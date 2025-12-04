@@ -3744,6 +3744,237 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
+# Gráfico de Evolução das Notas por Turma ao Longo dos Bimestres
+st.markdown("### 📈 Evolução das Notas das Turmas ao Longo dos Bimestres")
+
+# Explicação do formato dos códigos das turmas
+with st.expander("ℹ️ Como ler os códigos das turmas?", expanded=False):
+    st.markdown("""
+    **Formato dos códigos das turmas:**
+    
+    Os códigos seguem o padrão: **`XX.XX/NIVEL.MODALIDADE-TURNO`**
+    
+    **Exemplo:** `62.01/EF.MAT-ANL`
+    - **62.01**: Código identificador da turma (pode incluir código da escola)
+    - **EF**: Nível de ensino - Ensino Fundamental (ou **EM** para Ensino Médio)
+    - **MAT**: Pode ser modalidade, disciplina ou turno (ex: MAT = Matutino ou Matemática)
+    - **ANL**: Período letivo (ANL = Anual)
+    
+    **Exemplo:** `82.02/EF.VESP-ANL`
+    - **82.02**: Código identificador da turma
+    - **EF**: Ensino Fundamental
+    - **VESP**: Pode ser modalidade ou turno (VESP = Vespertino)
+    - **ANL**: Anual
+    
+    ⚠️ **Nota:** O formato exato pode variar conforme o sistema de origem dos dados. 
+    Os códigos são gerados automaticamente pelo sistema educacional e identificam 
+    unicamente cada turma no banco de dados.
+    
+    💡 **Dica:** Cada linha colorida no gráfico representa uma turma diferente. 
+    Você pode passar o mouse sobre as linhas para ver os valores exatos de cada bimestre.
+    """)
+
+# Criar coluna Bimestre no df_filt se ainda não existir
+if "Bimestre" not in df_filt.columns:
+    df_filt["Bimestre"] = df_filt["Periodo"].apply(mapear_bimestre)
+
+# Filtrar apenas registros com bimestre válido e nota válida
+df_evolucao = df_filt[(df_filt["Bimestre"].notna()) & (df_filt["Nota"].notna())].copy()
+
+if len(df_evolucao) > 0 and "Turma" in df_evolucao.columns:
+    # Calcular média geral por Turma e Bimestre
+    evolucao_turmas = df_evolucao.groupby(["Turma", "Bimestre"])["Nota"].mean().reset_index()
+    evolucao_turmas = evolucao_turmas.rename(columns={"Nota": "Média Geral"})
+    
+    # Ordenar por Bimestre para garantir ordem correta no gráfico
+    evolucao_turmas = evolucao_turmas.sort_values(["Turma", "Bimestre"])
+    
+    # Verificar se há dados suficientes
+    if len(evolucao_turmas) > 0:
+        # Criar gráfico de linha
+        fig_evolucao = px.line(
+            evolucao_turmas, 
+            x="Bimestre", 
+            y="Média Geral", 
+            color="Turma",
+            markers=True,
+            title="Evolução da Média Geral das Notas por Turma ao Longo dos 4 Bimestres",
+            labels={
+                "Bimestre": "Bimestre",
+                "Média Geral": "Média Geral das Notas",
+                "Turma": "Turma"
+            }
+        )
+        
+        # Personalizar layout
+        fig_evolucao.update_layout(
+            xaxis_title="Bimestre",
+            yaxis_title="Média Geral das Notas",
+            hovermode='x unified',
+            legend=dict(
+                title="Turma (passe o mouse para ver detalhes)",
+                orientation="v",
+                yanchor="top",
+                y=1,
+                xanchor="left",
+                x=1.02,
+                font=dict(size=9)
+            ),
+            height=500,
+            xaxis=dict(
+                tickmode='linear',
+                tick0=1,
+                dtick=1,
+                range=[0.5, 4.5]
+            )
+        )
+        
+        # Melhorar tooltip para mostrar mais informações
+        fig_evolucao.update_traces(
+            hovertemplate='<b>%{fullData.name}</b><br>' +
+                         'Bimestre: %{x}<br>' +
+                         'Média: %{y:.2f}<extra></extra>'
+        )
+        
+        # Adicionar linha de referência na média 6.0
+        fig_evolucao.add_hline(
+            y=6.0, 
+            line_dash="dash", 
+            line_color="red", 
+            annotation_text="Média Mínima (6.0)",
+            annotation_position="left"
+        )
+        
+        st.plotly_chart(fig_evolucao, use_container_width=True)
+        
+        # Botão de exportação
+        col_export_evol1, col_export_evol2 = st.columns([1, 4])
+        with col_export_evol1:
+            if st.button("📊 Exportar Dados do Gráfico", key="export_grafico_evolucao", help="Baixar planilha com dados da evolução"):
+                # Preparar dados para exportação
+                dados_export_evol = evolucao_turmas.copy()
+                dados_export_evol = dados_export_evol.rename(columns={
+                    'Turma': 'Turma',
+                    'Bimestre': 'Bimestre',
+                    'Média Geral': 'Media_Geral'
+                })
+                dados_export_evol = dados_export_evol.sort_values(["Turma", "Bimestre"])
+                
+                excel_data = criar_excel_formatado(dados_export_evol, "Evolucao_Notas_Turmas")
+                st.download_button(
+                    label="Baixar Excel",
+                    data=excel_data,
+                    file_name="evolucao_notas_turmas.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+        
+        # Estatísticas resumidas
+        st.markdown("**Resumo da Evolução:**")
+        col_res1, col_res2, col_res3 = st.columns(3)
+        
+        # Calcular média total de cada turma (média dos 4 bimestres)
+        medias_turmas = evolucao_turmas.groupby("Turma")["Média Geral"].mean().reset_index()
+        medias_turmas = medias_turmas.rename(columns={"Média Geral": "Média Total"})
+        medias_turmas = medias_turmas.sort_values("Média Total", ascending=False)
+        
+        with col_res1:
+            # Turma com melhor média total dos 4 bimestres
+            if len(medias_turmas) > 0:
+                melhor_turma = medias_turmas.iloc[0]
+                st.metric(
+                    "Melhor Média Total (4 Bimestres)", 
+                    f"{melhor_turma['Turma']}: {melhor_turma['Média Total']:.2f}"
+                )
+        
+        with col_res2:
+            # Turma com pior média total dos 4 bimestres
+            if len(medias_turmas) > 0:
+                pior_turma = medias_turmas.iloc[-1]
+                st.metric(
+                    "Pior Média Total (4 Bimestres)", 
+                    f"{pior_turma['Turma']}: {pior_turma['Média Total']:.2f}"
+                )
+        
+        with col_res3:
+            # Média geral de todas as turmas (média da escola)
+            if len(medias_turmas) > 0:
+                media_escola = medias_turmas["Média Total"].mean()
+                st.metric(
+                    "Média Geral da Escola", 
+                    f"{media_escola:.2f}"
+                )
+        
+        # Ranking Top 10 Melhores Alunos
+        st.markdown("---")
+        st.markdown("### 🏆 Top 10 Melhores Alunos da Escola (Média dos 4 Bimestres)")
+        
+        # Calcular média geral por aluno (média de todas as disciplinas)
+        try:
+            if "MediaFinal" in indic.columns and coluna_aluno in indic.columns:
+                # Agrupar por aluno e calcular média geral
+                ranking_alunos = indic.groupby([coluna_aluno, "Turma"])["MediaFinal"].mean().reset_index()
+                ranking_alunos = ranking_alunos.rename(columns={"MediaFinal": "Média Geral"})
+                
+                # Se um aluno estiver em múltiplas turmas, pegar a primeira turma
+                ranking_alunos = ranking_alunos.groupby(coluna_aluno).agg({
+                    "Média Geral": "mean",
+                    "Turma": "first"
+                }).reset_index()
+                
+                # Ordenar por média (maior para menor) e pegar top 10
+                ranking_alunos = ranking_alunos.sort_values("Média Geral", ascending=False).head(10).reset_index(drop=True)
+                
+                # Adicionar coluna de posição
+                ranking_alunos.insert(0, "Posição", range(1, len(ranking_alunos) + 1))
+                
+                # Formatar média para 2 casas decimais
+                ranking_alunos["Média Geral"] = ranking_alunos["Média Geral"].round(2)
+                
+                # Renomear colunas para exibição
+                ranking_alunos_display = ranking_alunos.copy()
+                ranking_alunos_display = ranking_alunos_display.rename(columns={
+                    coluna_aluno: "Aluno",
+                    "Turma": "Turma",
+                    "Média Geral": "Média Geral"
+                })
+                
+                # Exibir tabela estilizada
+                st.dataframe(
+                    ranking_alunos_display[["Posição", "Aluno", "Turma", "Média Geral"]],
+                    use_container_width=True,
+                    hide_index=True
+                )
+                
+                # Botão de exportação
+                col_exp_rank1, col_exp_rank2 = st.columns([1, 4])
+                with col_exp_rank1:
+                    if st.button("📊 Exportar Ranking", key="export_ranking_top10", help="Baixar planilha com ranking dos top 10 alunos"):
+                        dados_export_rank = ranking_alunos.copy()
+                        dados_export_rank = dados_export_rank.rename(columns={
+                            coluna_aluno: "Aluno",
+                            "Turma": "Turma",
+                            "Média Geral": "Media_Geral"
+                        })
+                        dados_export_rank = dados_export_rank[["Posição", "Aluno", "Turma", "Media_Geral"]]
+                        
+                        excel_data = criar_excel_formatado(dados_export_rank, "Ranking_Top10_Alunos")
+                        st.download_button(
+                            label="Baixar Excel",
+                            data=excel_data,
+                            file_name="ranking_top10_alunos.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        )
+            else:
+                st.info("Dados de média final não disponíveis para gerar o ranking.")
+        except NameError:
+            st.info("Dados de indicadores não disponíveis para gerar o ranking.")
+    else:
+        st.info("Não há dados suficientes para gerar o gráfico de evolução.")
+else:
+    st.info("Não há dados de turmas ou bimestres disponíveis para gerar o gráfico de evolução.")
+
+st.markdown("---")
+
 # Seção de Gráficos de Notas por Disciplina
 st.markdown("### 📊 Gráficos de Notas Abaixo da Média por Disciplina")
 
