@@ -10,7 +10,6 @@ import hashlib
 import re
 from datetime import datetime
 import os
-import math
 
 # Carregar variáveis de ambiente
 try:
@@ -35,6 +34,7 @@ except ImportError:
 # Importações para sistema de monitoramento
 try:
     from firebase_config import firebase_manager
+    from ip_utils import get_client_info
     from admin_page import tela_admin, dashboard_admin, relatorio_completo, estatisticas_usuario
     MONITORING_AVAILABLE = True
     
@@ -46,153 +46,6 @@ try:
         MONITORING_AVAILABLE = False
 except ImportError:
     MONITORING_AVAILABLE = False
-
-# Importar funções de localização (sempre disponível)
-try:
-    from ip_utils import get_client_info, get_city_from_ip, is_city_allowed, get_client_ip_from_session, get_client_city_from_session
-except ImportError:
-    # Fallback se ip_utils não existir
-    def get_client_info():
-        return {'ip': '127.0.0.1', 'user_agent': 'Unknown'}
-    def get_city_from_ip(ip):
-        return {'success': False, 'city': None, 'error': 'Sistema de localização não disponível'}
-    def is_city_allowed(city, allowed_cities):
-        return True  # Permitir acesso se não conseguir verificar
-    def get_client_ip_from_session():
-        return None
-    def get_client_city_from_session():
-        return None
-
-# -----------------------------
-# Lista de Cidades Permitidas com Coordenadas GPS
-# -----------------------------
-# Coordenadas (latitude, longitude) do centro de cada cidade
-CIDADES_PERMITIDAS_COORDENADAS = {
-    "Aliança do Tocantins": (-11.3056, -48.9361),
-    "Alvorada": (-12.4789, -49.1247),
-    "Araguaçu": (-12.9289, -49.8269),
-    "Cariri do Tocantins": (-11.8881, -49.1608),
-    "Crixás do Tocantins": (-11.0994, -48.9156),
-    "Dueré": (-11.3417, -49.2714),
-    "Figueirópolis": (-12.1311, -49.1742),
-    "Formoso do Araguaia": (-11.7975, -49.5286),
-    "Gurupi": (-11.7292, -49.0686),
-    "Jaú do Tocantins": (-12.6508, -48.5892),
-    "Palmeirópolis": (-13.0447, -48.4028),
-    "Peixe": (-12.0256, -48.5394),
-    "Sandolândia": (-12.5381, -49.9258),
-    "São Salvador do Tocantins": (-12.7458, -48.2356),
-    "São Valério": (-11.9742, -48.2353),
-    "Sucupira": (-11.9931, -48.9156),
-    "Talismã": (-12.7947, -49.0931)
-}
-
-CIDADES_PERMITIDAS = list(CIDADES_PERMITIDAS_COORDENADAS.keys())
-
-# Raio permitido em quilômetros (distância máxima do centro da cidade)
-RAIO_PERMITIDO_KM = 30
-
-# Configuração: Desabilitar validação de localização (True = desabilitado, False = habilitado)
-DESABILITAR_VALIDACAO_LOCALIZACAO = False
-
-# -----------------------------
-# Funções de Cálculo de Distância
-# -----------------------------
-def calcular_distancia_km(lat1, lon1, lat2, lon2):
-    """
-    Calcula a distância entre duas coordenadas GPS usando a fórmula de Haversine
-    Retorna a distância em quilômetros
-    """
-    # Raio da Terra em quilômetros
-    R = 6371.0
-    
-    # Converter graus para radianos
-    lat1_rad = math.radians(lat1)
-    lon1_rad = math.radians(lon1)
-    lat2_rad = math.radians(lat2)
-    lon2_rad = math.radians(lon2)
-    
-    # Diferenças
-    dlat = lat2_rad - lat1_rad
-    dlon = lon2_rad - lon1_rad
-    
-    # Fórmula de Haversine
-    a = math.sin(dlat / 2)**2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(dlon / 2)**2
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    
-    distancia = R * c
-    return distancia
-
-def obter_cidade_por_gps(latitude, longitude):
-    """
-    Obtém o nome da cidade usando geocoding reverso (coordenadas -> cidade)
-    """
-    try:
-        if REQUESTS_AVAILABLE:
-            # Usar API de geocoding reverso
-            response = requests.get(
-                f'http://ip-api.com/json/?fields=status,city,regionName,country&lat={latitude}&lon={longitude}',
-                timeout=5
-            )
-            if response.status_code == 200:
-                data = response.json()
-                if data.get('status') == 'success':
-                    return data.get('city', '').strip()
-            
-            # Tentar outra API
-            try:
-                response = requests.get(
-                    f'https://nominatim.openstreetmap.org/reverse?format=json&lat={latitude}&lon={longitude}&zoom=10',
-                    timeout=5,
-                    headers={'User-Agent': 'StreamlitApp/1.0'}
-                )
-                if response.status_code == 200:
-                    data = response.json()
-                    address = data.get('address', {})
-                    return address.get('city') or address.get('town') or address.get('village', '')
-            except:
-                pass
-    except:
-        pass
-    return None
-
-def verificar_localizacao_permitida(latitude, longitude):
-    """
-    Verifica se as coordenadas GPS estão dentro do raio permitido de alguma cidade
-    Retorna (True/False, cidade_mais_proxima, distancia_km, cidade_detectada)
-    """
-    if latitude is None or longitude is None:
-        return False, None, None, None
-    
-    # Primeiro, tentar obter o nome da cidade pelo GPS
-    cidade_detectada = obter_cidade_por_gps(latitude, longitude)
-    
-    # Se conseguiu identificar a cidade, verificar se está na lista
-    if cidade_detectada:
-        cidade_normalizada = normalize_city_name(cidade_detectada)
-        for cidade_permitida in CIDADES_PERMITIDAS:
-            if normalize_city_name(cidade_permitida) == cidade_normalizada:
-                # Cidade identificada está na lista - permitir
-                return True, cidade_permitida, 0, cidade_detectada
-    
-    # Se não identificou a cidade ou não está na lista, verificar por distância
-    menor_distancia = float('inf')
-    cidade_mais_proxima = None
-    
-    # Verificar distância até cada cidade permitida
-    for cidade, (lat_cidade, lon_cidade) in CIDADES_PERMITIDAS_COORDENADAS.items():
-        distancia = calcular_distancia_km(latitude, longitude, lat_cidade, lon_cidade)
-        
-        if distancia < menor_distancia:
-            menor_distancia = distancia
-            cidade_mais_proxima = cidade
-        
-        # Se estiver dentro do raio permitido, retorna True
-        if distancia <= RAIO_PERMITIDO_KM:
-            return True, cidade, distancia, cidade_detectada or cidade
-    
-    # Não está dentro do raio de nenhuma cidade
-    return False, cidade_mais_proxima, menor_distancia, cidade_detectada
 
 # -----------------------------
 # Sistema de Autenticação
@@ -232,7 +85,7 @@ def _has_recent_access(usuario_nome):
         return False
 
 def autenticar_usuario(identificador, senha):
-    """Autentica usuário com CPF ou INEP e senha, com validação de localização"""
+    """Autentica usuário com CPF ou INEP e senha"""
     df_usuarios = carregar_usuarios()
     if df_usuarios is None:
         return None
@@ -257,85 +110,6 @@ def autenticar_usuario(identificador, senha):
         if (cpf_usuario and cpf_usuario == id_limpo) or (inep_usuario and inep_usuario == id_limpo):
             # Verificar senha (comparação direta)
             if str(usuario.get('SENHA', '')) == str(senha):
-                # Validar localização antes de permitir login
-                if DESABILITAR_VALIDACAO_LOCALIZACAO:
-                    # Validação desabilitada - permitir acesso
-                    pass
-                else:
-                    try:
-                        # Tentar obter coordenadas GPS da sessão
-                        latitude = st.session_state.get('gps_latitude')
-                        longitude = st.session_state.get('gps_longitude')
-                        geo_error = st.session_state.get('geo_error')
-                        
-                        if latitude and longitude:
-                            # Coordenadas GPS obtidas - validar distância
-                            permitido, cidade_proxima, distancia, cidade_detectada = verificar_localizacao_permitida(latitude, longitude)
-                            
-                            if not permitido:
-                                # Não está dentro do raio permitido - BLOQUEAR
-                                if cidade_detectada:
-                                    return {
-                                        'erro': 'localizacao',
-                                        'cidade': cidade_detectada,
-                                        'mensagem': f'Acesso restrito. Sua localização ({cidade_detectada}) não está autorizada para acessar este sistema.'
-                                    }
-                                elif cidade_proxima:
-                                    return {
-                                        'erro': 'localizacao',
-                                        'cidade': cidade_proxima,
-                                        'mensagem': f'Acesso restrito. Sua localização está a {distancia:.1f} km de {cidade_proxima}, fora do raio permitido de {RAIO_PERMITIDO_KM} km.'
-                                    }
-                                else:
-                                    return {
-                                        'erro': 'localizacao',
-                                        'cidade': 'Desconhecida',
-                                        'mensagem': f'Acesso restrito. Sua localização não está dentro do raio permitido de {RAIO_PERMITIDO_KM} km das cidades autorizadas.'
-                                    }
-                            # Se permitido, continua normalmente
-                        elif geo_error:
-                            # Erro ao obter localização GPS
-                            if geo_error == '1':  # PERMISSION_DENIED
-                                return {
-                                    'erro': 'localizacao',
-                                    'cidade': 'Permissão negada',
-                                    'mensagem': 'É necessário permitir o acesso à sua localização para acessar o sistema. Por favor, recarregue a página e permita o acesso à localização quando solicitado.'
-                                }
-                            elif geo_error == '2':  # POSITION_UNAVAILABLE
-                                return {
-                                    'erro': 'localizacao',
-                                    'cidade': 'Indisponível',
-                                    'mensagem': 'Não foi possível determinar sua localização. Verifique se o GPS está ativado e tente novamente.'
-                                }
-                            elif geo_error == '3':  # TIMEOUT
-                                return {
-                                    'erro': 'localizacao',
-                                    'cidade': 'Timeout',
-                                    'mensagem': 'Tempo esgotado ao obter sua localização. Por favor, tente novamente.'
-                                }
-                            else:  # not_supported ou outro erro
-                                return {
-                                    'erro': 'localizacao',
-                                    'cidade': 'Erro',
-                                    'mensagem': 'Não foi possível verificar sua localização. Seu navegador pode não suportar geolocalização ou você precisa permitir o acesso.'
-                                }
-                        else:
-                            # Ainda não obteve localização - aguardar
-                            # Por segurança, bloquear até obter localização
-                            return {
-                                'erro': 'localizacao',
-                                'cidade': 'Aguardando',
-                                'mensagem': 'Aguardando permissão de localização. Por favor, permita o acesso à sua localização quando solicitado pelo navegador.'
-                            }
-                    except Exception as e:
-                        # Em caso de erro na validação, bloquear por segurança
-                        print(f"Erro ao validar localização: {e}")
-                    return {
-                        'erro': 'localizacao',
-                        'cidade': 'Erro',
-                        'mensagem': 'Erro ao verificar localização. Acesso negado por segurança.'
-                    }
-                
                 # Registrar acesso apenas no momento do login
                 if MONITORING_AVAILABLE:
                     try:
@@ -568,82 +342,6 @@ def tela_instrucoes():
 
 def tela_login():
     """Exibe tela de login"""
-    # JavaScript para obter localização GPS do cliente
-    query_params = st.query_params
-    
-    # Verificar se já tem coordenadas
-    if 'lat' in query_params and 'lon' in query_params:
-        try:
-            st.session_state.gps_latitude = float(query_params['lat'])
-            st.session_state.gps_longitude = float(query_params['lon'])
-            st.query_params.clear()
-            st.rerun()
-        except:
-            pass
-    elif 'geo_error' in query_params:
-        st.session_state.geo_error = query_params['geo_error']
-        st.query_params.clear()
-    
-    # Se ainda não tem coordenadas, solicitar
-    if 'gps_latitude' not in st.session_state or 'gps_longitude' not in st.session_state:
-        # Mostrar mensagem e botão para solicitar localização
-        st.warning("📍 **Permissão de Localização Necessária**\n\nPara acessar o sistema, é necessário permitir o acesso à sua localização.")
-        
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            if st.button("🔒 Solicitar Permissão de Localização", use_container_width=True, type="primary"):
-                st.session_state.solicitar_gps = True
-                st.rerun()
-        
-        # JavaScript para solicitar localização automaticamente ou quando clicar no botão
-        if st.session_state.get('solicitar_gps', False) or 'solicitar_gps' not in st.session_state:
-            # Tentar automaticamente na primeira vez
-            if 'solicitar_gps' not in st.session_state:
-                st.session_state.solicitar_gps = True
-            
-            st.markdown("""
-            <script>
-            (function() {
-                // Aguardar um pouco para garantir que a página carregou
-                setTimeout(function() {
-                    if (navigator.geolocation) {
-                        console.log('Solicitando permissão de localização...');
-                        
-                        navigator.geolocation.getCurrentPosition(
-                            function(position) {
-                                const lat = position.coords.latitude;
-                                const lon = position.coords.longitude;
-                                console.log('Localização obtida:', lat, lon);
-                                
-                                // Redirecionar com as coordenadas
-                                const url = new URL(window.location);
-                                url.searchParams.set('lat', lat.toString());
-                                url.searchParams.set('lon', lon.toString());
-                                window.location.href = url.toString();
-                            },
-                            function(error) {
-                                console.error('Erro ao obter localização:', error.code, error.message);
-                                const url = new URL(window.location);
-                                url.searchParams.set('geo_error', error.code.toString());
-                                window.location.href = url.toString();
-                            },
-                            {
-                                enableHighAccuracy: true,
-                                timeout: 20000,
-                                maximumAge: 0
-                            }
-                        );
-                    } else {
-                        console.error('Geolocalização não disponível');
-                        const url = new URL(window.location);
-                        url.searchParams.set('geo_error', 'not_supported');
-                        window.location.href = url.toString();
-                    }
-                }, 300);
-            })();
-            </script>
-            """, unsafe_allow_html=True)
-    
     # CSS para botão de instruções maior
     st.markdown("""
     <style>
@@ -700,15 +398,10 @@ def tela_login():
             else:
                 usuario = autenticar_usuario(identificador, senha)
                 if usuario:
-                    # Verificar se há erro de localização
-                    if isinstance(usuario, dict) and usuario.get('erro') == 'localizacao':
-                        st.error(f"🚫 {usuario.get('mensagem', 'Acesso negado por localização.')}")
-                        st.info("💡 Se você acredita que isso é um erro, entre em contato com o administrador do sistema.")
-                    else:
-                        st.session_state.logado = True
-                        st.session_state.usuario = usuario
-                        st.success(f"Login realizado com sucesso!")
-                        st.rerun()
+                    st.session_state.logado = True
+                    st.session_state.usuario = usuario
+                    st.success(f"Login realizado com sucesso!")
+                    st.rerun()
                 else:
                     st.error("CPF/INEP ou senha incorretos!")
         
