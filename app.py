@@ -146,31 +146,66 @@ def autenticar_usuario(identificador, senha):
             if str(usuario.get('SENHA', '')) == str(senha):
                 # Validar localização antes de permitir login
                 try:
-                    client_info = get_client_info()
-                    ip = client_info['ip']
-                    
-                    # Obter cidade do IP
-                    location_data = get_city_from_ip(ip)
-                    
-                    # Verificar se a cidade está permitida
-                    if location_data.get('success') and location_data.get('city'):
-                        cidade_usuario = location_data.get('city', '')
-                        if not is_city_allowed(cidade_usuario, CIDADES_PERMITIDAS):
-                            # Cidade não permitida
+                    # Obter localização diretamente da API (detecta IP do cliente automaticamente)
+                    # Isso é mais confiável do que tentar obter o IP primeiro
+                    if REQUESTS_AVAILABLE:
+                        try:
+                            # API detecta automaticamente o IP de quem faz a requisição
+                            response = requests.get('http://ip-api.com/json/?fields=status,message,city,regionName,country,query', timeout=5)
+                            if response.status_code == 200:
+                                data = response.json()
+                                if data.get('status') == 'success':
+                                    cidade_usuario = data.get('city', '')
+                                    ip_detectado = data.get('query', '')
+                                    
+                                    # Verificar se é IP local (desenvolvimento)
+                                    if ip_detectado in ['127.0.0.1', 'localhost'] or (ip_detectado and (ip_detectado.startswith('192.168.') or ip_detectado.startswith('10.'))):
+                                        # IP local - permitir acesso em desenvolvimento
+                                        pass
+                                    elif cidade_usuario:
+                                        # Verificar se a cidade está permitida
+                                        if not is_city_allowed(cidade_usuario, CIDADES_PERMITIDAS):
+                                            # Cidade não permitida
+                                            return {
+                                                'erro': 'localizacao',
+                                                'cidade': cidade_usuario,
+                                                'mensagem': f'Acesso restrito. Sua localização ({cidade_usuario}) não está autorizada para acessar este sistema.'
+                                            }
+                                else:
+                                    # Erro na API - bloquear por segurança
+                                    return {
+                                        'erro': 'localizacao',
+                                        'cidade': 'Desconhecida',
+                                        'mensagem': 'Não foi possível verificar sua localização. Acesso negado por segurança.'
+                                    }
+                            else:
+                                # Erro HTTP - bloquear por segurança
+                                return {
+                                    'erro': 'localizacao',
+                                    'cidade': 'Desconhecida',
+                                    'mensagem': 'Não foi possível verificar sua localização. Acesso negado por segurança.'
+                                }
+                        except requests.exceptions.Timeout:
+                            # Timeout - bloquear por segurança
                             return {
                                 'erro': 'localizacao',
-                                'cidade': cidade_usuario,
-                                'mensagem': f'Acesso restrito. Sua localização ({cidade_usuario}) não está autorizada para acessar este sistema.'
+                                'cidade': 'Desconhecida',
+                                'mensagem': 'Timeout ao verificar localização. Acesso negado por segurança.'
                             }
-                    elif ip in ['127.0.0.1', 'localhost']:
-                        # IP local (desenvolvimento) - permitir acesso
-                        pass
+                        except Exception as e:
+                            # Erro geral - bloquear por segurança
+                            print(f"Erro ao verificar localização: {e}")
+                            return {
+                                'erro': 'localizacao',
+                                'cidade': 'Erro',
+                                'mensagem': 'Erro ao verificar localização. Acesso negado por segurança.'
+                            }
                     else:
-                        # Erro ao obter localização - por segurança, bloquear
+                        # Requests não disponível - bloquear por segurança
                         return {
                             'erro': 'localizacao',
-                            'cidade': 'Desconhecida',
-                            'mensagem': 'Não foi possível verificar sua localização. Acesso negado por segurança.'
+                            'cidade': 'Erro',
+                            'mensagem': 'Sistema de verificação de localização não disponível. Acesso negado por segurança.'
                         }
                 except Exception as e:
                     # Em caso de erro na validação, bloquear por segurança

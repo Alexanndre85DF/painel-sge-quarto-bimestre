@@ -8,17 +8,45 @@ import unicodedata
 def get_client_ip() -> str:
     """Obtém o IP do cliente através do Streamlit"""
     try:
-        # Streamlit não expõe diretamente o IP, então usamos serviços externos
-        # como fallback para desenvolvimento
+        # Tentar obter IP real do cliente usando APIs que detectam automaticamente
+        # o IP de quem faz a requisição
+        apis = [
+            'https://api.ipify.org?format=json',
+            'https://ipapi.co/ip/',
+            'https://icanhazip.com',
+            'https://ifconfig.me/ip'
+        ]
+        
+        for api_url in apis:
+            try:
+                response = requests.get(api_url, timeout=3)
+                if response.status_code == 200:
+                    # Diferentes APIs retornam em formatos diferentes
+                    if 'ipify' in api_url:
+                        ip = response.json().get('ip', '')
+                    elif 'ipapi.co' in api_url:
+                        ip = response.text.strip()
+                    else:
+                        ip = response.text.strip()
+                    
+                    if ip and ip != '127.0.0.1' and not ip.startswith('192.168.') and not ip.startswith('10.'):
+                        return ip
+            except:
+                continue
+        
+        # Se todas as APIs falharem, tentar usar geolocalização direta
+        # que detecta automaticamente o IP do cliente
         try:
-            # Tenta obter IP local primeiro (para desenvolvimento)
-            response = requests.get('https://httpbin.org/ip', timeout=5)
+            response = requests.get('http://ip-api.com/json/?fields=query', timeout=3)
             if response.status_code == 200:
-                return response.json().get('origin', '127.0.0.1')
+                data = response.json()
+                ip = data.get('query', '')
+                if ip:
+                    return ip
         except:
             pass
         
-        # Fallback para IP local
+        # Fallback para IP local (apenas em desenvolvimento)
         return '127.0.0.1'
     except Exception:
         return 'Unknown'
