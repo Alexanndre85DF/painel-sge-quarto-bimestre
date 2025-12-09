@@ -518,73 +518,71 @@ def tela_instrucoes():
 def tela_login():
     """Exibe tela de login"""
     # JavaScript para obter localização GPS do cliente
+    query_params = st.query_params
+    
+    # Verificar se já tem coordenadas
+    if 'lat' in query_params and 'lon' in query_params:
+        try:
+            st.session_state.gps_latitude = float(query_params['lat'])
+            st.session_state.gps_longitude = float(query_params['lon'])
+            st.query_params.clear()
+            st.rerun()
+        except:
+            pass
+    elif 'geo_error' in query_params:
+        st.session_state.geo_error = query_params['geo_error']
+        st.query_params.clear()
+    
+    # Se ainda não tem coordenadas, solicitar
     if 'gps_latitude' not in st.session_state or 'gps_longitude' not in st.session_state:
-        st.markdown("""
-        <script>
-        (function() {
-            // Verificar se geolocalização está disponível
-            if (navigator.geolocation) {
-                // Pedir permissão de localização
-                navigator.geolocation.getCurrentPosition(
-                    function(position) {
-                        // Sucesso: obter coordenadas
-                        const lat = position.coords.latitude;
-                        const lon = position.coords.longitude;
-                        
-                        // Enviar para o Streamlit via query params
-                        if (window.location.search.indexOf('lat=') === -1) {
+        # Mostrar mensagem e botão para solicitar localização
+        st.warning("📍 **Permissão de Localização Necessária**\n\nPara acessar o sistema, é necessário permitir o acesso à sua localização.")
+        
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            if st.button("🔒 Solicitar Permissão de Localização", use_container_width=True, type="primary"):
+                st.session_state.solicitar_gps = True
+                st.rerun()
+        
+        # JavaScript para solicitar localização automaticamente ou quando clicar no botão
+        if st.session_state.get('solicitar_gps', False):
+            st.markdown("""
+            <script>
+            (function() {
+                if (navigator.geolocation) {
+                    console.log('Solicitando permissão de localização...');
+                    
+                    navigator.geolocation.getCurrentPosition(
+                        function(position) {
+                            const lat = position.coords.latitude;
+                            const lon = position.coords.longitude;
+                            console.log('Localização obtida:', lat, lon);
+                            
                             const params = new URLSearchParams(window.location.search);
                             params.set('lat', lat.toString());
                             params.set('lon', lon.toString());
-                            window.history.replaceState({}, '', window.location.pathname + '?' + params.toString());
-                            window.location.reload();
-                        }
-                    },
-                    function(error) {
-                        // Erro ao obter localização
-                        console.error('Erro ao obter localização:', error);
-                        // Se o usuário negar, ainda assim tentar enviar sinal de erro
-                        if (window.location.search.indexOf('geo_error=') === -1) {
+                            window.location.href = window.location.pathname + '?' + params.toString();
+                        },
+                        function(error) {
+                            console.error('Erro ao obter localização:', error.code, error.message);
                             const params = new URLSearchParams(window.location.search);
                             params.set('geo_error', error.code.toString());
-                            window.history.replaceState({}, '', window.location.pathname + '?' + params.toString());
-                            window.location.reload();
+                            window.location.href = window.location.pathname + '?' + params.toString();
+                        },
+                        {
+                            enableHighAccuracy: true,
+                            timeout: 20000,
+                            maximumAge: 0
                         }
-                    },
-                    {
-                        enableHighAccuracy: true,
-                        timeout: 10000,
-                        maximumAge: 0
-                    }
-                );
-            } else {
-                // Geolocalização não disponível
-                console.error('Geolocalização não disponível no navegador');
-                if (window.location.search.indexOf('geo_error=') === -1) {
+                    );
+                } else {
                     const params = new URLSearchParams(window.location.search);
                     params.set('geo_error', 'not_supported');
-                    window.history.replaceState({}, '', window.location.pathname + '?' + params.toString());
-                    window.location.reload();
+                    window.location.href = window.location.pathname + '?' + params.toString();
                 }
-            }
-        })();
-        </script>
-        """, unsafe_allow_html=True)
-        
-        # Tentar obter coordenadas dos query params
-        query_params = st.query_params
-        if 'lat' in query_params and 'lon' in query_params:
-            try:
-                st.session_state.gps_latitude = float(query_params['lat'])
-                st.session_state.gps_longitude = float(query_params['lon'])
-                # Limpar query params após obter
-                st.query_params.clear()
-            except:
-                pass
-        elif 'geo_error' in query_params:
-            # Erro ao obter localização
-            st.session_state.geo_error = query_params['geo_error']
-            st.query_params.clear()
+            })();
+            </script>
+            """, unsafe_allow_html=True)
     
     # CSS para botão de instruções maior
     st.markdown("""
