@@ -123,14 +123,59 @@ def calcular_distancia_km(lat1, lon1, lat2, lon2):
     distancia = R * c
     return distancia
 
+def obter_cidade_por_gps(latitude, longitude):
+    """
+    Obtém o nome da cidade usando geocoding reverso (coordenadas -> cidade)
+    """
+    try:
+        if REQUESTS_AVAILABLE:
+            # Usar API de geocoding reverso
+            response = requests.get(
+                f'http://ip-api.com/json/?fields=status,city,regionName,country&lat={latitude}&lon={longitude}',
+                timeout=5
+            )
+            if response.status_code == 200:
+                data = response.json()
+                if data.get('status') == 'success':
+                    return data.get('city', '').strip()
+            
+            # Tentar outra API
+            try:
+                response = requests.get(
+                    f'https://nominatim.openstreetmap.org/reverse?format=json&lat={latitude}&lon={longitude}&zoom=10',
+                    timeout=5,
+                    headers={'User-Agent': 'StreamlitApp/1.0'}
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    address = data.get('address', {})
+                    return address.get('city') or address.get('town') or address.get('village', '')
+            except:
+                pass
+    except:
+        pass
+    return None
+
 def verificar_localizacao_permitida(latitude, longitude):
     """
     Verifica se as coordenadas GPS estão dentro do raio permitido de alguma cidade
-    Retorna (True/False, cidade_mais_proxima, distancia_km)
+    Retorna (True/False, cidade_mais_proxima, distancia_km, cidade_detectada)
     """
     if latitude is None or longitude is None:
-        return False, None, None
+        return False, None, None, None
     
+    # Primeiro, tentar obter o nome da cidade pelo GPS
+    cidade_detectada = obter_cidade_por_gps(latitude, longitude)
+    
+    # Se conseguiu identificar a cidade, verificar se está na lista
+    if cidade_detectada:
+        cidade_normalizada = normalize_city_name(cidade_detectada)
+        for cidade_permitida in CIDADES_PERMITIDAS:
+            if normalize_city_name(cidade_permitida) == cidade_normalizada:
+                # Cidade identificada está na lista - permitir
+                return True, cidade_permitida, 0, cidade_detectada
+    
+    # Se não identificou a cidade ou não está na lista, verificar por distância
     menor_distancia = float('inf')
     cidade_mais_proxima = None
     
@@ -144,10 +189,10 @@ def verificar_localizacao_permitida(latitude, longitude):
         
         # Se estiver dentro do raio permitido, retorna True
         if distancia <= RAIO_PERMITIDO_KM:
-            return True, cidade, distancia
+            return True, cidade, distancia, cidade_detectada or cidade
     
     # Não está dentro do raio de nenhuma cidade
-    return False, cidade_mais_proxima, menor_distancia
+    return False, cidade_mais_proxima, menor_distancia, cidade_detectada
 
 # -----------------------------
 # Sistema de Autenticação
@@ -225,11 +270,17 @@ def autenticar_usuario(identificador, senha):
                         
                         if latitude and longitude:
                             # Coordenadas GPS obtidas - validar distância
-                            permitido, cidade_proxima, distancia = verificar_localizacao_permitida(latitude, longitude)
+                            permitido, cidade_proxima, distancia, cidade_detectada = verificar_localizacao_permitida(latitude, longitude)
                             
                             if not permitido:
                                 # Não está dentro do raio permitido - BLOQUEAR
-                                if cidade_proxima:
+                                if cidade_detectada:
+                                    return {
+                                        'erro': 'localizacao',
+                                        'cidade': cidade_detectada,
+                                        'mensagem': f'Acesso restrito. Sua localização ({cidade_detectada}) não está autorizada para acessar este sistema.'
+                                    }
+                                elif cidade_proxima:
                                     return {
                                         'erro': 'localizacao',
                                         'cidade': cidade_proxima,
@@ -545,41 +596,50 @@ def tela_login():
                 st.rerun()
         
         # JavaScript para solicitar localização automaticamente ou quando clicar no botão
-        if st.session_state.get('solicitar_gps', False):
+        if st.session_state.get('solicitar_gps', False) or 'solicitar_gps' not in st.session_state:
+            # Tentar automaticamente na primeira vez
+            if 'solicitar_gps' not in st.session_state:
+                st.session_state.solicitar_gps = True
+            
             st.markdown("""
             <script>
             (function() {
-                if (navigator.geolocation) {
-                    console.log('Solicitando permissão de localização...');
-                    
-                    navigator.geolocation.getCurrentPosition(
-                        function(position) {
-                            const lat = position.coords.latitude;
-                            const lon = position.coords.longitude;
-                            console.log('Localização obtida:', lat, lon);
-                            
-                            const params = new URLSearchParams(window.location.search);
-                            params.set('lat', lat.toString());
-                            params.set('lon', lon.toString());
-                            window.location.href = window.location.pathname + '?' + params.toString();
-                        },
-                        function(error) {
-                            console.error('Erro ao obter localização:', error.code, error.message);
-                            const params = new URLSearchParams(window.location.search);
-                            params.set('geo_error', error.code.toString());
-                            window.location.href = window.location.pathname + '?' + params.toString();
-                        },
-                        {
-                            enableHighAccuracy: true,
-                            timeout: 20000,
-                            maximumAge: 0
-                        }
-                    );
-                } else {
-                    const params = new URLSearchParams(window.location.search);
-                    params.set('geo_error', 'not_supported');
-                    window.location.href = window.location.pathname + '?' + params.toString();
-                }
+                // Aguardar um pouco para garantir que a página carregou
+                setTimeout(function() {
+                    if (navigator.geolocation) {
+                        console.log('Solicitando permissão de localização...');
+                        
+                        navigator.geolocation.getCurrentPosition(
+                            function(position) {
+                                const lat = position.coords.latitude;
+                                const lon = position.coords.longitude;
+                                console.log('Localização obtida:', lat, lon);
+                                
+                                // Redirecionar com as coordenadas
+                                const url = new URL(window.location);
+                                url.searchParams.set('lat', lat.toString());
+                                url.searchParams.set('lon', lon.toString());
+                                window.location.href = url.toString();
+                            },
+                            function(error) {
+                                console.error('Erro ao obter localização:', error.code, error.message);
+                                const url = new URL(window.location);
+                                url.searchParams.set('geo_error', error.code.toString());
+                                window.location.href = url.toString();
+                            },
+                            {
+                                enableHighAccuracy: true,
+                                timeout: 20000,
+                                maximumAge: 0
+                            }
+                        );
+                    } else {
+                        console.error('Geolocalização não disponível');
+                        const url = new URL(window.location);
+                        url.searchParams.set('geo_error', 'not_supported');
+                        window.location.href = url.toString();
+                    }
+                }, 300);
             })();
             </script>
             """, unsafe_allow_html=True)
