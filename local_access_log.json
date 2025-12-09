@@ -243,5 +243,40 @@
     "user_agent": "Streamlit App",
     "timestamp": "2025-12-03T21:06:14.033104-03:00",
     "data_hora": "03/12/2025 21:06:14"
+  },
+  {
+    "usuario": "ALEXANDRE PEREIRA TOLENTINO",
+    "ip": "186.192.249.137",
+    "user_agent": "Streamlit App",
+    "timestamp": "2025-12-03T21:14:26.950254-03:00",
+    "data_hora": "03/12/2025 21:14:26"
+  },
+  {
+    "usuario": "ALEXANDRE PEREIRA TOLENTINO",
+    "ip": "127.0.0.1",
+    "user_agent": "Streamlit App",
+    "timestamp": "2025-12-08T23:07:03.589329-03:00",
+    "data_hora": "08/12/2025 23:07:03"
+  },
+  {
+    "usuario": "ALEXANDRE PEREIRA TOLENTINO",
+    "ip": "186.192.249.137",
+    "user_agent": "Streamlit App",
+    "timestamp": "2025-12-08T23:11:15.814625-03:00",
+    "data_hora": "08/12/2025 23:11:15"
+  },
+  {
+    "usuario": "ALEXANDRE PEREIRA TOLENTINO",
+    "ip": "127.0.0.1",
+    "user_agent": "Streamlit App",
+    "timestamp": "2025-12-08T23:15:46.327463-03:00",
+    "data_hora": "08/12/2025 23:15:46"
+  },
+  {
+    "usuario": "ALEXANDRE PEREIRA TOLENTINO",
+    "ip": "127.0.0.1",
+    "user_agent": "Streamlit App",
+    "timestamp": "2025-12-08T23:19:44.103559-03:00",
+    "data_hora": "08/12/2025 23:19:44"
   }
 ]

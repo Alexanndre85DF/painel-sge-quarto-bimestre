@@ -2416,13 +2416,31 @@ if "Frequencia Anual" in df_filt.columns or "Frequencia" in df_filt.columns:
             st.stop()
     
     if "Frequencia Anual" in df_filt.columns:
-        freq_geral = df_filt.groupby(coluna_aluno)["Frequencia Anual"].last().reset_index()
+        # Agrupar por aluno E turma (igual à tabela detalhada) para garantir consistência
+        freq_geral = df_filt.groupby([coluna_aluno, "Turma"])["Frequencia Anual"].last().reset_index()
         freq_geral = freq_geral.rename(columns={"Frequencia Anual": "Frequencia"})
     else:
-        freq_geral = df_filt.groupby(coluna_aluno)["Frequencia"].last().reset_index()
+        # Agrupar por aluno E turma (igual à tabela detalhada) para garantir consistência
+        freq_geral = df_filt.groupby([coluna_aluno, "Turma"])["Frequencia"].last().reset_index()
     
     freq_geral["Classificacao_Freq"] = freq_geral["Frequencia"].apply(classificar_frequencia_geral)
-    contagem_freq_geral = freq_geral["Classificacao_Freq"].value_counts()
+    
+    # Contar alunos únicos por classificação com priorização
+    # Um aluno só é contado na pior categoria que ele possui (para evitar duplicação)
+    alunos_por_classificacao = {}
+    alunos_ja_contados = set()
+    
+    # Ordem de prioridade (da pior para a melhor)
+    ordem_prioridade = ["Reprovado", "Alto Risco", "Risco Moderado", "Ponto de Atenção", "Meta Favorável"]
+    
+    for classificacao in ordem_prioridade:
+        alunos_na_categoria = set(freq_geral[freq_geral["Classificacao_Freq"] == classificacao][coluna_aluno].unique())
+        # Contar apenas alunos que ainda não foram contados em categorias piores
+        alunos_novos = alunos_na_categoria - alunos_ja_contados
+        alunos_por_classificacao[classificacao] = len(alunos_novos)
+        alunos_ja_contados.update(alunos_novos)
+    
+    contagem_freq_geral = pd.Series(alunos_por_classificacao)
     
     # Calcular total de alunos para porcentagem
     total_alunos_freq = contagem_freq_geral.sum()
@@ -2807,16 +2825,49 @@ def classificar_frequencia(freq):
 # Calcular frequências se a coluna existir
 if "Frequencia Anual" in df_filt.columns:
     # Usar frequência anual se disponível
-    freq_atual = df_filt.groupby(coluna_aluno)["Frequencia Anual"].last().reset_index()
+    # Agrupar por aluno E turma (igual à tabela detalhada) para garantir consistência
+    freq_atual = df_filt.groupby([coluna_aluno, "Turma"])["Frequencia Anual"].last().reset_index()
     freq_atual = freq_atual.rename(columns={"Frequencia Anual": "Frequencia"})
     freq_atual["Classificacao_Freq"] = freq_atual["Frequencia"].apply(classificar_frequencia)
+    
+    # Contar alunos únicos por classificação com priorização
+    # Um aluno só é contado na pior categoria que ele possui (para evitar duplicação)
+    alunos_por_classificacao = {}
+    alunos_ja_contados = set()
+    
+    # Ordem de prioridade (da pior para a melhor)
+    ordem_prioridade = ["Reprovado", "Alto Risco", "Risco Moderado", "Ponto de Atenção", "Meta Favorável"]
+    
+    for classificacao in ordem_prioridade:
+        alunos_na_categoria = set(freq_atual[freq_atual["Classificacao_Freq"] == classificacao][coluna_aluno].unique())
+        # Contar apenas alunos que ainda não foram contados em categorias piores
+        alunos_novos = alunos_na_categoria - alunos_ja_contados
+        alunos_por_classificacao[classificacao] = len(alunos_novos)
+        alunos_ja_contados.update(alunos_novos)
+    
+    contagem_freq = pd.Series(alunos_por_classificacao)
 elif "Frequencia" in df_filt.columns:
     # Usar frequência do período se anual não estiver disponível
-    freq_atual = df_filt.groupby(coluna_aluno)["Frequencia"].last().reset_index()
+    # Agrupar por aluno E turma (igual à tabela detalhada) para garantir consistência
+    freq_atual = df_filt.groupby([coluna_aluno, "Turma"])["Frequencia"].last().reset_index()
     freq_atual["Classificacao_Freq"] = freq_atual["Frequencia"].apply(classificar_frequencia)
     
-    # Contar por classificação
-    contagem_freq = freq_atual["Classificacao_Freq"].value_counts()
+    # Contar alunos únicos por classificação com priorização
+    # Um aluno só é contado na pior categoria que ele possui (para evitar duplicação)
+    alunos_por_classificacao = {}
+    alunos_ja_contados = set()
+    
+    # Ordem de prioridade (da pior para a melhor)
+    ordem_prioridade = ["Reprovado", "Alto Risco", "Risco Moderado", "Ponto de Atenção", "Meta Favorável"]
+    
+    for classificacao in ordem_prioridade:
+        alunos_na_categoria = set(freq_atual[freq_atual["Classificacao_Freq"] == classificacao][coluna_aluno].unique())
+        # Contar apenas alunos que ainda não foram contados em categorias piores
+        alunos_novos = alunos_na_categoria - alunos_ja_contados
+        alunos_por_classificacao[classificacao] = len(alunos_novos)
+        alunos_ja_contados.update(alunos_novos)
+    
+    contagem_freq = pd.Series(alunos_por_classificacao)
     
     with col7:
         st.metric(
