@@ -35,7 +35,7 @@ except ImportError:
 # Importações para sistema de monitoramento
 try:
     from firebase_config import firebase_manager
-    from ip_utils import get_client_info, get_city_from_ip, is_city_allowed
+    from ip_utils import get_client_info
     from admin_page import tela_admin, dashboard_admin, relatorio_completo, estatisticas_usuario
     MONITORING_AVAILABLE = True
     
@@ -225,10 +225,12 @@ def autenticar_usuario(identificador, senha):
                                     'mensagem': 'Não foi possível verificar sua localização GPS. Seu navegador pode não suportar geolocalização ou você precisa permitir o acesso.'
                                 }
                         else:
-                            # Ainda não obteve localização - NÃO bloquear, apenas permitir acesso
-                            # O GPS será validado na próxima tentativa quando for obtido
-                            print(f"AVISO: Login sem GPS ainda - permitindo acesso temporariamente para obter GPS")
-                            pass  # Não bloquear, deixar passar
+                            # Ainda não obteve localização - aguardar
+                            return {
+                                'erro': 'localizacao',
+                                'cidade': 'Aguardando',
+                                'mensagem': 'Aguardando permissão de localização GPS. Por favor, permita o acesso à sua localização quando solicitado pelo navegador.'
+                            }
                     except Exception as e:
                         # Erro na validação - BLOQUEAR por segurança
                         print(f"Erro ao validar localização GPS: {e}")
@@ -492,29 +494,22 @@ def tela_login():
         st.warning("📍 **Permissão de Localização GPS Necessária**\n\nPara acessar o sistema, é necessário permitir o acesso à sua localização GPS. O navegador irá solicitar sua permissão.")
         
         # Botão manual para tentar novamente
-        if st.button("🔄 Tentar Obter Localização Novamente", use_container_width=True, type="primary"):
-            st.session_state.tentar_gps_novamente = True
-            st.rerun()
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            if st.button("🔄 Tentar Obter Localização GPS", use_container_width=True, type="primary"):
+                st.session_state.tentar_gps = True
+                st.rerun()
         
         # JavaScript para solicitar localização GPS automaticamente
-        if st.session_state.get('tentar_gps_novamente', True):
+        if st.session_state.get('tentar_gps', True):
             st.markdown("""
             <script>
             (function() {
-                // Verificar se está em HTTPS
-                if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
-                    console.warn('⚠️ Geolocalização requer HTTPS (exceto localhost)');
-                    alert('⚠️ Para usar geolocalização, o site precisa estar em HTTPS. Atualmente está em: ' + location.protocol);
-                }
-                
                 console.log('🔍 Iniciando solicitação de localização GPS...');
-                console.log('Protocolo:', location.protocol);
-                console.log('Hostname:', location.hostname);
                 
                 if (navigator.geolocation) {
                     console.log('✅ Geolocalização disponível no navegador');
                     
-                    // Tentar obter localização
                     navigator.geolocation.getCurrentPosition(
                         function(position) {
                             const lat = position.coords.latitude;
@@ -534,19 +529,6 @@ def tela_login():
                             console.error('Código do erro:', error.code);
                             console.error('Mensagem:', error.message);
                             
-                            let mensagem = '';
-                            if (error.code === 1) {
-                                mensagem = 'Permissão de localização negada pelo usuário.';
-                            } else if (error.code === 2) {
-                                mensagem = 'Localização indisponível.';
-                            } else if (error.code === 3) {
-                                mensagem = 'Timeout ao obter localização.';
-                            }
-                            
-                            if (mensagem) {
-                                alert('❌ ' + mensagem + ' Por favor, permita o acesso à localização nas configurações do navegador.');
-                            }
-                            
                             const url = new URL(window.location);
                             url.searchParams.set('geo_error', error.code.toString());
                             window.location.href = url.toString();
@@ -559,7 +541,6 @@ def tela_login():
                     );
                 } else {
                     console.error('❌ Geolocalização NÃO disponível no navegador');
-                    alert('❌ Seu navegador não suporta geolocalização. Por favor, use um navegador moderno.');
                     const url = new URL(window.location);
                     url.searchParams.set('geo_error', 'not_supported');
                     window.location.href = url.toString();
@@ -567,15 +548,6 @@ def tela_login():
             })();
             </script>
             """, unsafe_allow_html=True)
-            
-            # Instruções adicionais
-            st.info("""
-            **Se o navegador não solicitar permissão:**
-            1. Verifique se o site está em **HTTPS** (geolocalização requer HTTPS)
-            2. Verifique as configurações do navegador → Permissões → Localização
-            3. Tente clicar no botão acima novamente
-            4. Se estiver em localhost (desenvolvimento), pode funcionar sem HTTPS
-            """)
     
     # CSS para botão de instruções maior
     st.markdown("""
