@@ -225,12 +225,10 @@ def autenticar_usuario(identificador, senha):
                                     'mensagem': 'Não foi possível verificar sua localização GPS. Seu navegador pode não suportar geolocalização ou você precisa permitir o acesso.'
                                 }
                         else:
-                            # Ainda não obteve localização - aguardar
-                            return {
-                                'erro': 'localizacao',
-                                'cidade': 'Aguardando',
-                                'mensagem': 'Aguardando permissão de localização GPS. Por favor, permita o acesso à sua localização quando solicitado pelo navegador.'
-                            }
+                            # Ainda não obteve localização - NÃO bloquear, apenas permitir acesso
+                            # O GPS será validado na próxima tentativa quando for obtido
+                            print(f"AVISO: Login sem GPS ainda - permitindo acesso temporariamente para obter GPS")
+                            pass  # Não bloquear, deixar passar
                     except Exception as e:
                         # Erro na validação - BLOQUEAR por segurança
                         print(f"Erro ao validar localização GPS: {e}")
@@ -493,42 +491,54 @@ def tela_login():
         # Mostrar mensagem informativa
         st.warning("📍 **Permissão de Localização GPS Necessária**\n\nPara acessar o sistema, é necessário permitir o acesso à sua localização GPS. O navegador irá solicitar sua permissão.")
         
+        # Botão manual para tentar novamente
+        if st.button("🔄 Tentar Obter Localização Novamente", use_container_width=True, type="primary"):
+            st.session_state.tentar_gps_novamente = True
+            st.rerun()
+        
         # JavaScript para solicitar localização GPS automaticamente
-        st.markdown("""
-        <script>
-        (function() {
-            if (navigator.geolocation) {
-                navigator.geolocation.getCurrentPosition(
-                    function(position) {
-                        const lat = position.coords.latitude;
-                        const lon = position.coords.longitude;
-                        console.log('Localização GPS obtida:', lat, lon);
-                        
-                        const url = new URL(window.location);
-                        url.searchParams.set('lat', lat.toString());
-                        url.searchParams.set('lon', lon.toString());
-                        window.location.href = url.toString();
-                    },
-                    function(error) {
-                        console.error('Erro ao obter localização GPS:', error.code, error.message);
-                        const url = new URL(window.location);
-                        url.searchParams.set('geo_error', error.code.toString());
-                        window.location.href = url.toString();
-                    },
-                    {
-                        enableHighAccuracy: true,
-                        timeout: 20000,
-                        maximumAge: 0
-                    }
-                );
-            } else {
-                const url = new URL(window.location);
-                url.searchParams.set('geo_error', 'not_supported');
-                window.location.href = url.toString();
-            }
-        })();
-        </script>
-        """, unsafe_allow_html=True)
+        if st.session_state.get('tentar_gps_novamente', True):
+            st.markdown("""
+            <script>
+            (function() {
+                console.log('Iniciando solicitação de localização GPS...');
+                
+                if (navigator.geolocation) {
+                    console.log('Geolocalização disponível');
+                    
+                    navigator.geolocation.getCurrentPosition(
+                        function(position) {
+                            const lat = position.coords.latitude;
+                            const lon = position.coords.longitude;
+                            console.log('✅ Localização GPS obtida:', lat, lon);
+                            
+                            const url = new URL(window.location);
+                            url.searchParams.set('lat', lat.toString());
+                            url.searchParams.set('lon', lon.toString());
+                            console.log('Redirecionando para:', url.toString());
+                            window.location.href = url.toString();
+                        },
+                        function(error) {
+                            console.error('❌ Erro ao obter localização GPS:', error.code, error.message);
+                            const url = new URL(window.location);
+                            url.searchParams.set('geo_error', error.code.toString());
+                            window.location.href = url.toString();
+                        },
+                        {
+                            enableHighAccuracy: true,
+                            timeout: 30000,
+                            maximumAge: 0
+                        }
+                    );
+                } else {
+                    console.error('❌ Geolocalização não disponível no navegador');
+                    const url = new URL(window.location);
+                    url.searchParams.set('geo_error', 'not_supported');
+                    window.location.href = url.toString();
+                }
+            })();
+            </script>
+            """, unsafe_allow_html=True)
     
     # CSS para botão de instruções maior
     st.markdown("""
