@@ -34,7 +34,7 @@ except ImportError:
 # Importações para sistema de monitoramento
 try:
     from firebase_config import firebase_manager
-    from ip_utils import get_client_info
+    from ip_utils import get_client_info, get_city_from_ip, is_city_allowed
     from admin_page import tela_admin, dashboard_admin, relatorio_completo, estatisticas_usuario
     MONITORING_AVAILABLE = True
     
@@ -46,6 +46,32 @@ try:
         MONITORING_AVAILABLE = False
 except ImportError:
     MONITORING_AVAILABLE = False
+
+# -----------------------------
+# Lista de Cidades Permitidas
+# -----------------------------
+CIDADES_PERMITIDAS = [
+    "Aliança do Tocantins",
+    "Alvorada",
+    "Araguaçu",
+    "Cariri do Tocantins",
+    "Crixás do Tocantins",
+    "Dueré",
+    "Figueirópolis",
+    "Formoso do Araguaia",
+    "Gurupi",
+    "Jaú do Tocantins",
+    "Palmeirópolis",
+    "Peixe",
+    "Sandolândia",
+    "São Salvador do Tocantins",
+    "São Valério",
+    "Sucupira",
+    "Talismã"
+]
+
+# Configuração: Desabilitar validação de localização (True = desabilitado, False = habilitado)
+DESABILITAR_VALIDACAO_LOCALIZACAO = False
 
 # -----------------------------
 # Sistema de Autenticação
@@ -110,6 +136,44 @@ def autenticar_usuario(identificador, senha):
         if (cpf_usuario and cpf_usuario == id_limpo) or (inep_usuario and inep_usuario == id_limpo):
             # Verificar senha (comparação direta)
             if str(usuario.get('SENHA', '')) == str(senha):
+                # Validar localização antes de permitir login
+                if not DESABILITAR_VALIDACAO_LOCALIZACAO and REQUESTS_AVAILABLE:
+                    try:
+                        # Obter cidade do IP do cliente
+                        location_data = get_city_from_ip()  # Sem IP, API detecta automaticamente
+                        
+                        if location_data.get('success') and location_data.get('city'):
+                            cidade_usuario = location_data.get('city', '').strip()
+                            ip_detectado = location_data.get('ip', '')
+                            
+                            # Se for IP local (desenvolvimento), permitir
+                            if ip_detectado in ['127.0.0.1', 'localhost'] or (ip_detectado and (ip_detectado.startswith('192.168.') or ip_detectado.startswith('10.'))):
+                                pass  # Permitir acesso em desenvolvimento
+                            elif cidade_usuario:
+                                # Verificar se a cidade está na lista permitida
+                                if not is_city_allowed(cidade_usuario, CIDADES_PERMITIDAS):
+                                    # Cidade não está na lista - BLOQUEAR
+                                    return {
+                                        'erro': 'localizacao',
+                                        'cidade': cidade_usuario,
+                                        'mensagem': f'Acesso restrito. Sua localização ({cidade_usuario}) não está autorizada para acessar este sistema.'
+                                    }
+                        else:
+                            # Erro ao obter localização - BLOQUEAR por segurança
+                            return {
+                                'erro': 'localizacao',
+                                'cidade': 'Desconhecida',
+                                'mensagem': 'Não foi possível verificar sua localização. Acesso negado por segurança.'
+                            }
+                    except Exception as e:
+                        # Erro na validação - BLOQUEAR por segurança
+                        print(f"Erro ao validar localização: {e}")
+                        return {
+                            'erro': 'localizacao',
+                            'cidade': 'Erro',
+                            'mensagem': 'Erro ao verificar localização. Acesso negado por segurança.'
+                        }
+                
                 # Registrar acesso apenas no momento do login
                 if MONITORING_AVAILABLE:
                     try:
@@ -398,10 +462,15 @@ def tela_login():
             else:
                 usuario = autenticar_usuario(identificador, senha)
                 if usuario:
-                    st.session_state.logado = True
-                    st.session_state.usuario = usuario
-                    st.success(f"Login realizado com sucesso!")
-                    st.rerun()
+                    # Verificar se há erro de localização
+                    if isinstance(usuario, dict) and usuario.get('erro') == 'localizacao':
+                        st.error(f"🚫 {usuario.get('mensagem', 'Acesso negado por localização.')}")
+                        st.info("💡 Se você acredita que isso é um erro, entre em contato com o administrador do sistema.")
+                    else:
+                        st.session_state.logado = True
+                        st.session_state.usuario = usuario
+                        st.success(f"Login realizado com sucesso!")
+                        st.rerun()
                 else:
                     st.error("CPF/INEP ou senha incorretos!")
         
