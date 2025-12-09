@@ -48,7 +48,7 @@ except ImportError:
 
 # Importar funções de localização (sempre disponível)
 try:
-    from ip_utils import get_client_info, get_city_from_ip, is_city_allowed
+    from ip_utils import get_client_info, get_city_from_ip, is_city_allowed, get_client_ip_from_session, get_client_city_from_session
 except ImportError:
     # Fallback se ip_utils não existir
     def get_client_info():
@@ -57,6 +57,10 @@ except ImportError:
         return {'success': False, 'city': None, 'error': 'Sistema de localização não disponível'}
     def is_city_allowed(city, allowed_cities):
         return True  # Permitir acesso se não conseguir verificar
+    def get_client_ip_from_session():
+        return None
+    def get_client_city_from_session():
+        return None
 
 # -----------------------------
 # Lista de Cidades Permitidas
@@ -80,6 +84,10 @@ CIDADES_PERMITIDAS = [
     "Sucupira",
     "Talismã"
 ]
+
+# Configuração: Desabilitar validação de localização (True = desabilitado, False = habilitado)
+# Use True apenas para testes ou se o servidor não conseguir detectar o IP do cliente corretamente
+DESABILITAR_VALIDACAO_LOCALIZACAO = False
 
 # -----------------------------
 # Sistema de Autenticação
@@ -145,71 +153,85 @@ def autenticar_usuario(identificador, senha):
             # Verificar senha (comparação direta)
             if str(usuario.get('SENHA', '')) == str(senha):
                 # Validar localização antes de permitir login
-                try:
-                    # Obter localização diretamente da API (detecta IP do cliente automaticamente)
-                    # Isso é mais confiável do que tentar obter o IP primeiro
-                    if REQUESTS_AVAILABLE:
-                        try:
-                            # API detecta automaticamente o IP de quem faz a requisição
-                            response = requests.get('http://ip-api.com/json/?fields=status,message,city,regionName,country,query', timeout=5)
-                            if response.status_code == 200:
-                                data = response.json()
-                                if data.get('status') == 'success':
-                                    cidade_usuario = data.get('city', '')
-                                    ip_detectado = data.get('query', '')
-                                    
-                                    # Verificar se é IP local (desenvolvimento)
-                                    if ip_detectado in ['127.0.0.1', 'localhost'] or (ip_detectado and (ip_detectado.startswith('192.168.') or ip_detectado.startswith('10.'))):
-                                        # IP local - permitir acesso em desenvolvimento
-                                        pass
-                                    elif cidade_usuario:
-                                        # Verificar se a cidade está permitida
-                                        if not is_city_allowed(cidade_usuario, CIDADES_PERMITIDAS):
-                                            # Cidade não permitida
-                                            return {
-                                                'erro': 'localizacao',
-                                                'cidade': cidade_usuario,
-                                                'mensagem': f'Acesso restrito. Sua localização ({cidade_usuario}) não está autorizada para acessar este sistema.'
-                                            }
+                if DESABILITAR_VALIDACAO_LOCALIZACAO:
+                    # Validação desabilitada - permitir acesso
+                    pass
+                else:
+                    try:
+                        # Tentar obter cidade da sessão (obtida via JavaScript no frontend)
+                        cidade_usuario = get_client_city_from_session()
+                        
+                        if cidade_usuario:
+                            # Cidade obtida do frontend - validar
+                            cidade_usuario = cidade_usuario.strip()
+                            if not is_city_allowed(cidade_usuario, CIDADES_PERMITIDAS):
+                                # Cidade não está na lista - BLOQUEAR
+                                return {
+                                    'erro': 'localizacao',
+                                    'cidade': cidade_usuario,
+                                    'mensagem': f'Acesso restrito. Sua localização ({cidade_usuario}) não está autorizada para acessar este sistema.'
+                                }
+                        elif REQUESTS_AVAILABLE:
+                            # Fallback: tentar obter via API do servidor (menos confiável)
+                            try:
+                                response = requests.get('http://ip-api.com/json/?fields=status,message,city,regionName,country,query', timeout=5)
+                                if response.status_code == 200:
+                                    data = response.json()
+                                    if data.get('status') == 'success':
+                                        cidade_usuario = data.get('city', '').strip()
+                                        ip_detectado = data.get('query', '')
+                                        
+                                        # Se for IP local (desenvolvimento), permitir
+                                        if ip_detectado in ['127.0.0.1', 'localhost'] or (ip_detectado and (ip_detectado.startswith('192.168.') or ip_detectado.startswith('10.'))):
+                                            pass  # Permitir acesso em desenvolvimento
+                                        elif cidade_usuario:
+                                            # Verificar se a cidade está na lista permitida
+                                            if not is_city_allowed(cidade_usuario, CIDADES_PERMITIDAS):
+                                                # Cidade não está na lista - BLOQUEAR
+                                                return {
+                                                    'erro': 'localizacao',
+                                                    'cidade': cidade_usuario,
+                                                    'mensagem': f'Acesso restrito. Sua localização ({cidade_usuario}) não está autorizada para acessar este sistema.'
+                                                }
+                                    else:
+                                        # Erro na API - BLOQUEAR por segurança
+                                        return {
+                                            'erro': 'localizacao',
+                                            'cidade': 'Desconhecida',
+                                            'mensagem': 'Não foi possível verificar sua localização. Acesso negado por segurança.'
+                                        }
                                 else:
-                                    # Erro na API - bloquear por segurança
+                                    # Erro HTTP - BLOQUEAR por segurança
                                     return {
                                         'erro': 'localizacao',
                                         'cidade': 'Desconhecida',
                                         'mensagem': 'Não foi possível verificar sua localização. Acesso negado por segurança.'
                                     }
-                            else:
-                                # Erro HTTP - bloquear por segurança
+                            except requests.exceptions.Timeout:
+                                # Timeout - BLOQUEAR por segurança
                                 return {
                                     'erro': 'localizacao',
                                     'cidade': 'Desconhecida',
-                                    'mensagem': 'Não foi possível verificar sua localização. Acesso negado por segurança.'
+                                    'mensagem': 'Timeout ao verificar localização. Acesso negado por segurança.'
                                 }
-                        except requests.exceptions.Timeout:
-                            # Timeout - bloquear por segurança
+                            except Exception as e:
+                                # Erro geral - BLOQUEAR por segurança
+                                print(f"Erro ao verificar localização: {e}")
+                                return {
+                                    'erro': 'localizacao',
+                                    'cidade': 'Erro',
+                                    'mensagem': 'Erro ao verificar localização. Acesso negado por segurança.'
+                                }
+                        else:
+                            # Não conseguiu obter cidade - BLOQUEAR por segurança
                             return {
                                 'erro': 'localizacao',
                                 'cidade': 'Desconhecida',
-                                'mensagem': 'Timeout ao verificar localização. Acesso negado por segurança.'
+                                'mensagem': 'Não foi possível identificar sua cidade. Acesso negado por segurança.'
                             }
-                        except Exception as e:
-                            # Erro geral - bloquear por segurança
-                            print(f"Erro ao verificar localização: {e}")
-                            return {
-                                'erro': 'localizacao',
-                                'cidade': 'Erro',
-                                'mensagem': 'Erro ao verificar localização. Acesso negado por segurança.'
-                            }
-                    else:
-                        # Requests não disponível - bloquear por segurança
-                        return {
-                            'erro': 'localizacao',
-                            'cidade': 'Erro',
-                            'mensagem': 'Sistema de verificação de localização não disponível. Acesso negado por segurança.'
-                        }
-                except Exception as e:
-                    # Em caso de erro na validação, bloquear por segurança
-                    print(f"Erro ao validar localização: {e}")
+                    except Exception as e:
+                        # Em caso de erro na validação, bloquear por segurança
+                        print(f"Erro ao validar localização: {e}")
                     return {
                         'erro': 'localizacao',
                         'cidade': 'Erro',
@@ -448,6 +470,70 @@ def tela_instrucoes():
 
 def tela_login():
     """Exibe tela de login"""
+    # JavaScript para obter IP e cidade do cliente no frontend
+    if 'client_ip_real' not in st.session_state or 'client_city_real' not in st.session_state:
+        st.markdown("""
+        <script>
+        (function() {
+            // Obter IP e cidade do cliente via JavaScript
+            fetch('http://ip-api.com/json/?fields=status,city,query')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        // Armazenar na sessão via componente hidden
+                        const ip = data.query;
+                        const city = data.city;
+                        
+                        // Criar input hidden para enviar ao Streamlit
+                        const form = document.createElement('form');
+                        form.method = 'POST';
+                        form.style.display = 'none';
+                        
+                        const ipInput = document.createElement('input');
+                        ipInput.type = 'hidden';
+                        ipInput.name = 'client_ip';
+                        ipInput.value = ip;
+                        
+                        const cityInput = document.createElement('input');
+                        cityInput.type = 'hidden';
+                        cityInput.name = 'client_city';
+                        cityInput.value = city;
+                        
+                        form.appendChild(ipInput);
+                        form.appendChild(cityInput);
+                        document.body.appendChild(form);
+                        
+                        // Usar window.parent.postMessage para comunicar com Streamlit
+                        if (window.parent && window.parent !== window) {
+                            window.parent.postMessage({
+                                type: 'streamlit:setComponentValue',
+                                value: {ip: ip, city: city}
+                            }, '*');
+                        }
+                        
+                        // Alternativa: usar query params
+                        if (window.location.search.indexOf('ip=') === -1) {
+                            const params = new URLSearchParams(window.location.search);
+                            params.set('ip', ip);
+                            params.set('city', city);
+                            window.history.replaceState({}, '', window.location.pathname + '?' + params.toString());
+                            window.location.reload();
+                        }
+                    }
+                })
+                .catch(error => console.error('Erro ao obter localização:', error));
+        })();
+        </script>
+        """, unsafe_allow_html=True)
+        
+        # Tentar obter IP e cidade dos query params
+        query_params = st.query_params
+        if 'ip' in query_params and 'city' in query_params:
+            st.session_state.client_ip_real = query_params['ip']
+            st.session_state.client_city_real = query_params['city']
+            # Limpar query params após obter
+            st.query_params.clear()
+    
     # CSS para botão de instruções maior
     st.markdown("""
     <style>

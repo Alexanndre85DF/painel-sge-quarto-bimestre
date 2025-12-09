@@ -4,9 +4,24 @@ Utilitários para obter informações de IP e navegador do usuário
 import streamlit as st
 import requests
 import unicodedata
+import re
+
+def get_client_ip_from_session() -> str:
+    """Obtém o IP do cliente armazenado na sessão (obtido via JavaScript)"""
+    try:
+        return st.session_state.get('client_ip_real', None)
+    except:
+        return None
+
+def get_client_city_from_session() -> str:
+    """Obtém a cidade do cliente armazenada na sessão (obtida via JavaScript)"""
+    try:
+        return st.session_state.get('client_city_real', None)
+    except:
+        return None
 
 def get_client_ip() -> str:
-    """Obtém o IP do cliente através do Streamlit"""
+    """Obtém o IP do cliente através do Streamlit (fallback)"""
     try:
         # Tentar obter IP real do cliente usando APIs que detectam automaticamente
         # o IP de quem faz a requisição
@@ -66,10 +81,14 @@ def normalize_city_name(city_name: str) -> str:
     if not city_name:
         return ""
     # Remove acentos
-    nfkd = unicodedata.normalize('NFKD', city_name)
+    nfkd = unicodedata.normalize('NFKD', str(city_name))
     city_normalized = ''.join([c for c in nfkd if not unicodedata.combining(c)])
-    # Converte para minúsculas e remove espaços extras
-    return city_normalized.lower().strip()
+    # Converte para minúsculas, remove espaços extras e remove caracteres especiais no final
+    city_clean = city_normalized.lower().strip()
+    # Remove sufixos comuns que podem vir da API (ex: " - TO", "-TO", etc)
+    city_clean = re.sub(r'\s*-\s*[A-Z]{2}\s*$', '', city_clean)
+    city_clean = re.sub(r'\s*,\s*.*$', '', city_clean)  # Remove tudo após vírgula
+    return city_clean
 
 def get_city_from_ip(ip: str) -> dict:
     """Obtém a cidade do IP usando API de geolocalização"""
