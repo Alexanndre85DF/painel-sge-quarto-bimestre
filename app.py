@@ -501,25 +501,52 @@ def tela_login():
             st.markdown("""
             <script>
             (function() {
-                console.log('Iniciando solicitação de localização GPS...');
+                // Verificar se está em HTTPS
+                if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+                    console.warn('⚠️ Geolocalização requer HTTPS (exceto localhost)');
+                    alert('⚠️ Para usar geolocalização, o site precisa estar em HTTPS. Atualmente está em: ' + location.protocol);
+                }
+                
+                console.log('🔍 Iniciando solicitação de localização GPS...');
+                console.log('Protocolo:', location.protocol);
+                console.log('Hostname:', location.hostname);
                 
                 if (navigator.geolocation) {
-                    console.log('Geolocalização disponível');
+                    console.log('✅ Geolocalização disponível no navegador');
                     
+                    // Tentar obter localização
                     navigator.geolocation.getCurrentPosition(
                         function(position) {
                             const lat = position.coords.latitude;
                             const lon = position.coords.longitude;
-                            console.log('✅ Localização GPS obtida:', lat, lon);
+                            console.log('✅ Localização GPS obtida com sucesso!');
+                            console.log('📍 Latitude:', lat);
+                            console.log('📍 Longitude:', lon);
                             
                             const url = new URL(window.location);
                             url.searchParams.set('lat', lat.toString());
                             url.searchParams.set('lon', lon.toString());
-                            console.log('Redirecionando para:', url.toString());
+                            console.log('🔄 Redirecionando com coordenadas...');
                             window.location.href = url.toString();
                         },
                         function(error) {
-                            console.error('❌ Erro ao obter localização GPS:', error.code, error.message);
+                            console.error('❌ Erro ao obter localização GPS');
+                            console.error('Código do erro:', error.code);
+                            console.error('Mensagem:', error.message);
+                            
+                            let mensagem = '';
+                            if (error.code === 1) {
+                                mensagem = 'Permissão de localização negada pelo usuário.';
+                            } else if (error.code === 2) {
+                                mensagem = 'Localização indisponível.';
+                            } else if (error.code === 3) {
+                                mensagem = 'Timeout ao obter localização.';
+                            }
+                            
+                            if (mensagem) {
+                                alert('❌ ' + mensagem + ' Por favor, permita o acesso à localização nas configurações do navegador.');
+                            }
+                            
                             const url = new URL(window.location);
                             url.searchParams.set('geo_error', error.code.toString());
                             window.location.href = url.toString();
@@ -531,7 +558,8 @@ def tela_login():
                         }
                     );
                 } else {
-                    console.error('❌ Geolocalização não disponível no navegador');
+                    console.error('❌ Geolocalização NÃO disponível no navegador');
+                    alert('❌ Seu navegador não suporta geolocalização. Por favor, use um navegador moderno.');
                     const url = new URL(window.location);
                     url.searchParams.set('geo_error', 'not_supported');
                     window.location.href = url.toString();
@@ -539,6 +567,15 @@ def tela_login():
             })();
             </script>
             """, unsafe_allow_html=True)
+            
+            # Instruções adicionais
+            st.info("""
+            **Se o navegador não solicitar permissão:**
+            1. Verifique se o site está em **HTTPS** (geolocalização requer HTTPS)
+            2. Verifique as configurações do navegador → Permissões → Localização
+            3. Tente clicar no botão acima novamente
+            4. Se estiver em localhost (desenvolvimento), pode funcionar sem HTTPS
+            """)
     
     # CSS para botão de instruções maior
     st.markdown("""
