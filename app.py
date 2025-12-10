@@ -8,10 +8,8 @@ from openpyxl.styles import PatternFill, Font, Alignment
 from openpyxl.utils.dataframe import dataframe_to_rows
 import hashlib
 import re
-from datetime import datetime, timedelta
+from datetime import datetime
 import os
-import secrets
-import string
 
 # Carregar variáveis de ambiente
 try:
@@ -112,125 +110,27 @@ def autenticar_usuario(identificador, senha):
         if (cpf_usuario and cpf_usuario == id_limpo) or (inep_usuario and inep_usuario == id_limpo):
             # Verificar senha (comparação direta)
             if str(usuario.get('SENHA', '')) == str(senha):
+                # Registrar acesso apenas no momento do login
+                if MONITORING_AVAILABLE:
+                    try:
+                        client_info = get_client_info()
+                        # Sempre registrar o acesso (removida verificação de acesso recente)
+                        firebase_manager.log_access(
+                            usuario=usuario.get('NOME', 'Usuário'),
+                            ip=client_info['ip'],
+                            user_agent=client_info['user_agent']
+                        )
+                    except Exception as e:
+                        print(f"Erro ao registrar acesso: {e}")
+                
                 return {
                     'nome': usuario.get('NOME', 'Usuário'),
                     'cpf': cpf_usuario if cpf_usuario else None,
                     'inep': inep_usuario if inep_usuario else None,
                     'senha_atual': str(usuario.get('SENHA', '')),
-                    'linha': _,
-                    'email': _obter_email_usuario(usuario)
+                    'linha': _
                 }
     return None
-
-def _obter_email_usuario(usuario_row):
-    """Tenta obter email do usuário em diferentes variações de coluna"""
-    for chave in ['EMAIL', 'Email', 'email', 'E-MAIL', 'E-mail']:
-        valor = usuario_row.get(chave, '')
-        if pd.notna(valor) and str(valor).strip():
-            return str(valor).strip()
-    return ''
-
-def _gerar_codigo_verificacao():
-    """Gera código numérico de 6 dígitos"""
-    return ''.join(secrets.choice(string.digits) for _ in range(6))
-
-def _mascarar_email(email):
-    """Mascara parte do email para exibição"""
-    try:
-        local, dominio = email.split('@', 1)
-        if len(local) <= 2:
-            return f"{local[0]}***@{dominio}"
-        return f"{local[0]}***{local[-1]}@{dominio}"
-    except Exception:
-        return email
-
-def limpar_estado_2fa():
-    """Remove dados temporários do fluxo 2FA"""
-    for chave in ['codigo_2fa', 'codigo_2fa_expira', 'codigo_2fa_tentativas', 'pendente_2fa', 'usuario_temp', 'email_2fa']:
-        if chave in st.session_state:
-            st.session_state.pop(chave, None)
-
-def iniciar_fluxo_2fa(usuario):
-    """Inicia envio do código de verificação por email"""
-    email_usuario = usuario.get('email') or _obter_email_usuario(usuario)
-    if not email_usuario:
-        st.error("Usuário sem e-mail cadastrado. Contate o administrador.")
-        return False
-    
-    codigo = _gerar_codigo_verificacao()
-    st.session_state.pendente_2fa = True
-    st.session_state.codigo_2fa = codigo
-    st.session_state.codigo_2fa_expira = (datetime.now() + timedelta(minutes=5)).isoformat()
-    st.session_state.codigo_2fa_tentativas = 0
-    st.session_state.usuario_temp = usuario
-    st.session_state.email_2fa = email_usuario
-    
-    assunto = "Seu código de verificação do Painel SGE"
-    corpo = (
-        f"Olá {usuario.get('nome', 'usuário')},\n\n"
-        f"Seu código de verificação é: {codigo}\n"
-        "Ele é válido por 5 minutos.\n\n"
-        "Se você não solicitou este código, ignore este e-mail."
-    )
-    
-    ok, msg = enviar_email(email_usuario, assunto, corpo)
-    if ok:
-        st.success(f"Código enviado para {_mascarar_email(email_usuario)}. Verifique seu e-mail.")
-        return True
-    
-    st.error(f"Não foi possível enviar o código: {msg}")
-    limpar_estado_2fa()
-    return False
-
-def validar_codigo_2fa(codigo_digitado):
-    """Valida código digitado e conclui login"""
-    if not st.session_state.get('pendente_2fa'):
-        return False, "Nenhum código pendente."
-    
-    codigo_armazenado = st.session_state.get('codigo_2fa')
-    expira_raw = st.session_state.get('codigo_2fa_expira')
-    tentativas = st.session_state.get('codigo_2fa_tentativas', 0)
-    
-    # Checar expiração
-    try:
-        expira = datetime.fromisoformat(expira_raw) if expira_raw else None
-        if expira and datetime.now() > expira:
-            limpar_estado_2fa()
-            return False, "Código expirado. Clique em reenviar para gerar outro."
-    except Exception:
-        pass
-    
-    if not codigo_digitado:
-        return False, "Digite o código recebido por e-mail."
-    
-    if codigo_digitado == codigo_armazenado:
-        usuario_temp = st.session_state.get('usuario_temp')
-        st.session_state.logado = True
-        st.session_state.usuario = usuario_temp
-        
-        # Registrar acesso apenas após 2FA concluído
-        if MONITORING_AVAILABLE and usuario_temp:
-            try:
-                client_info = get_client_info()
-                firebase_manager.log_access(
-                    usuario=usuario_temp.get('nome', 'Usuário'),
-                    ip=client_info['ip'],
-                    user_agent=client_info['user_agent']
-                )
-            except Exception as e:
-                print(f"Erro ao registrar acesso: {e}")
-        
-        limpar_estado_2fa()
-        return True, "Código validado com sucesso!"
-    
-    tentativas += 1
-    st.session_state.codigo_2fa_tentativas = tentativas
-    
-    if tentativas >= 5:
-        limpar_estado_2fa()
-        return False, "Tentativas excedidas. Novo código necessário."
-    
-    return False, f"Código incorreto. Tentativa {tentativas}/5."
 
 def alterar_senha(identificador, senha_atual, nova_senha):
     """Altera a senha do usuário na planilha"""
@@ -473,42 +373,6 @@ def tela_login():
     
     st.markdown("---")
     
-    # Etapa 2FA: se já enviou código, pedir verificação
-    if st.session_state.get('pendente_2fa'):
-        st.markdown("### Confirme seu acesso")
-        st.info(f"Enviamos um código de 6 dígitos para {_mascarar_email(st.session_state.get('email_2fa', ''))}. Ele vale por 5 minutos.")
-        
-        with st.form("codigo_2fa_form"):
-            codigo_digitado = st.text_input("Código de verificação", max_chars=6, help="Digite os 6 números do e-mail")
-            col_b1, col_b2, col_b3 = st.columns(3)
-            with col_b1:
-                validar_btn = st.form_submit_button("Validar código", use_container_width=True, type="primary")
-            with col_b2:
-                reenviar_btn = st.form_submit_button("Reenviar código", use_container_width=True)
-            with col_b3:
-                cancelar_btn = st.form_submit_button("Cancelar", use_container_width=True)
-        
-        if validar_btn:
-            ok, msg = validar_codigo_2fa(codigo_digitado.strip())
-            if ok:
-                st.success(msg)
-                st.rerun()
-            else:
-                st.error(msg)
-        elif reenviar_btn:
-            usuario_tmp = st.session_state.get('usuario_temp')
-            if usuario_tmp:
-                if iniciar_fluxo_2fa(usuario_tmp):
-                    st.info("Novo código enviado.")
-            else:
-                st.error("Não foi possível reenviar. Faça login novamente.")
-        elif cancelar_btn:
-            limpar_estado_2fa()
-            st.info("Verificação cancelada. Faça login novamente.")
-        
-        # Não mostrar o formulário de login enquanto o código está pendente
-        return
-    
     col1, col2, col3 = st.columns([1, 2, 1])
     
     with col2:
@@ -534,8 +398,10 @@ def tela_login():
             else:
                 usuario = autenticar_usuario(identificador, senha)
                 if usuario:
-                    if iniciar_fluxo_2fa(usuario):
-                        st.info("Digite o código recebido para concluir o login.")
+                    st.session_state.logado = True
+                    st.session_state.usuario = usuario
+                    st.success(f"Login realizado com sucesso!")
+                    st.rerun()
                 else:
                     st.error("CPF/INEP ou senha incorretos!")
         
@@ -796,16 +662,11 @@ def enviar_email(destinatario, assunto, corpo, anexo=None):
         server.quit()
         
         # Salvar log
-        remetente_nome = "Sistema"
-        try:
-            remetente_nome = st.session_state.get('usuario', {}).get('nome', 'Sistema')
-        except Exception:
-            pass
         log_info = {
             "destinatario": destinatario,
             "assunto": assunto,
             "data": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
-            "remetente": remetente_nome,
+            "remetente": st.session_state.usuario['nome'],
             "status": "Enviado (Real)"
         }
         
@@ -827,16 +688,11 @@ def enviar_email_simulado(destinatario, assunto, corpo, anexo=None):
         time.sleep(1)  # Simular processamento
         
         # Salvar informações do "envio" em um arquivo de log
-        remetente_nome = "Sistema"
-        try:
-            remetente_nome = st.session_state.get('usuario', {}).get('nome', 'Sistema')
-        except Exception:
-            pass
         log_info = {
             "destinatario": destinatario,
             "assunto": assunto,
             "data": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
-            "remetente": remetente_nome,
+            "remetente": st.session_state.usuario['nome'],
             "status": "Enviado (Simulado)"
         }
         
@@ -2118,18 +1974,6 @@ if 'mostrar_stats_usuario' not in st.session_state:
     st.session_state.mostrar_stats_usuario = False
 if 'mostrar_sobre' not in st.session_state:
     st.session_state.mostrar_sobre = False
-if 'pendente_2fa' not in st.session_state:
-    st.session_state.pendente_2fa = False
-if 'codigo_2fa' not in st.session_state:
-    st.session_state.codigo_2fa = None
-if 'codigo_2fa_expira' not in st.session_state:
-    st.session_state.codigo_2fa_expira = None
-if 'codigo_2fa_tentativas' not in st.session_state:
-    st.session_state.codigo_2fa_tentativas = 0
-if 'usuario_temp' not in st.session_state:
-    st.session_state.usuario_temp = None
-if 'email_2fa' not in st.session_state:
-    st.session_state.email_2fa = None
 
 # Verificar se deve mostrar tela de instruções
 if st.session_state.mostrar_instrucoes:
