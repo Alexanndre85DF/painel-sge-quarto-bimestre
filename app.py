@@ -10,22 +10,13 @@ import hashlib
 import re
 from datetime import datetime
 import os
-import random
-import json
 
 # Carregar variáveis de ambiente
 try:
     from dotenv import load_dotenv
-    # Carregar .env explicitamente do diretório atual
-    import os as os_module
-    env_path = os_module.path.join(os_module.path.dirname(__file__), '.env')
-    load_dotenv(dotenv_path=env_path)
-    print(f"DEBUG - Tentando carregar .env de: {env_path}")
-    print(f"DEBUG - Arquivo .env existe: {os_module.path.exists(env_path)}")
+    load_dotenv()
 except ImportError:
-    print("DEBUG - python-dotenv não instalado! Execute: pip install python-dotenv")
-except Exception as e:
-    print(f"DEBUG - Erro ao carregar .env: {e}")
+    pass  # dotenv não instalado
 
 # Importações opcionais para funcionalidades de email/WhatsApp
 try:
@@ -93,36 +84,6 @@ def _has_recent_access(usuario_nome):
         print(f"Erro ao verificar acesso recente: {e}")
         return False
 
-def gerar_codigo_verificacao():
-    """Gera um código de verificação de 6 dígitos"""
-    return str(random.randint(100000, 999999))
-
-def enviar_codigo_verificacao_email(email_usuario, nome_usuario, codigo):
-    """Envia código de verificação por email"""
-    assunto = "Código de Verificação - Painel SGE"
-    corpo = f"""
-Olá {nome_usuario},
-
-Você está tentando acessar o Painel SGE.
-
-Seu código de verificação é:
-
-    {codigo}
-
-Este código é válido por 10 minutos.
-
-Se você não solicitou este acesso, ignore este email.
-
-Atenciosamente,
-Sistema Painel SGE
-"""
-    
-    try:
-        sucesso, mensagem = enviar_email(email_usuario, assunto, corpo)
-        return sucesso, mensagem
-    except Exception as e:
-        return False, f"Erro ao enviar código: {str(e)}"
-
 def autenticar_usuario(identificador, senha):
     """Autentica usuário com CPF ou INEP e senha"""
     df_usuarios = carregar_usuarios()
@@ -149,13 +110,6 @@ def autenticar_usuario(identificador, senha):
         if (cpf_usuario and cpf_usuario == id_limpo) or (inep_usuario and inep_usuario == id_limpo):
             # Verificar senha (comparação direta)
             if str(usuario.get('SENHA', '')) == str(senha):
-                # Obter email do usuário (pode estar em diferentes colunas)
-                email_usuario = None
-                for col in ['EMAIL', 'E-MAIL', 'Email', 'e-mail', 'email']:
-                    if col in usuario and pd.notna(usuario.get(col)) and str(usuario.get(col)).strip():
-                        email_usuario = str(usuario.get(col)).strip()
-                        break
-                
                 # Registrar acesso apenas no momento do login
                 if MONITORING_AVAILABLE:
                     try:
@@ -174,8 +128,7 @@ def autenticar_usuario(identificador, senha):
                     'cpf': cpf_usuario if cpf_usuario else None,
                     'inep': inep_usuario if inep_usuario else None,
                     'senha_atual': str(usuario.get('SENHA', '')),
-                    'linha': _,
-                    'email': email_usuario
+                    'linha': _
                 }
     return None
 
@@ -389,10 +342,6 @@ def tela_instrucoes():
 
 def tela_login():
     """Exibe tela de login"""
-    # Verificar se está aguardando código de verificação
-    if st.session_state.get('aguardando_codigo', False):
-        return tela_verificacao_codigo()
-    
     # CSS para botão de instruções maior
     st.markdown("""
     <style>
@@ -449,175 +398,16 @@ def tela_login():
             else:
                 usuario = autenticar_usuario(identificador, senha)
                 if usuario:
-                    # Verificar se tem email cadastrado
-                    email_usuario = usuario.get('email')
-                    if not email_usuario:
-                        st.error("❌ Email não encontrado na planilha! Por favor, adicione seu email na coluna 'EMAIL' ou 'E-MAIL' da planilha.")
-                    else:
-                        # Gerar código de verificação
-                        codigo_verificacao = gerar_codigo_verificacao()
-                        st.session_state.codigo_verificacao = codigo_verificacao
-                        st.session_state.usuario_aguardando_codigo = usuario
-                        st.session_state.email_usuario = email_usuario
-                        st.session_state.codigo_timestamp = datetime.now()
-                        
-                        # Enviar código por email
-                        with st.spinner("Enviando código de verificação por email..."):
-                            sucesso, mensagem = enviar_codigo_verificacao_email(
-                                email_usuario, 
-                                usuario.get('nome', 'Usuário'), 
-                                codigo_verificacao
-                            )
-                        
-                        if sucesso:
-                            st.success(f"✅ Código de verificação enviado para {email_usuario}")
-                            
-                            # Verificar se está em modo simulado e mostrar código na tela
-                            import os
-                            gmail_user = os.getenv('GMAIL_USER', 'seu_email@gmail.com')
-                            gmail_password = os.getenv('GMAIL_PASSWORD', '')
-                            
-                            if gmail_user == 'seu_email@gmail.com' or not gmail_password:
-                                # Modo simulado - mostrar código na tela para teste
-                                st.warning(f"⚠️ **MODO DE TESTE - Email não configurado**")
-                                st.info(f"🔑 **Seu código de verificação é: {codigo_verificacao}**\n\n*(Em produção, este código será enviado apenas por email)*")
-                                
-                                # Instruções para configurar email
-                                with st.expander("📧 Como configurar envio de email real"):
-                                    st.markdown("""
-                                    **Para enviar códigos por email de verdade:**
-                                    
-                                    1. **Crie um arquivo `.env`** na pasta do projeto com:
-                                    ```
-                                    GMAIL_USER=seu_email@gmail.com
-                                    GMAIL_PASSWORD=sua_senha_app
-                                    ```
-                                    
-                                    2. **Gere uma senha de app do Gmail:**
-                                    - Acesse: https://myaccount.google.com/security
-                                    - Ative "Verificação em duas etapas" (se não tiver)
-                                    - Vá em "Senhas de app" → Gere uma nova
-                                    - Use essa senha no `.env` (não sua senha normal!)
-                                    
-                                    3. **Reinicie o Streamlit** após criar o `.env`
-                                    
-                                    **Exemplo de arquivo `.env`:**
-                                    ```
-                                    GMAIL_USER=alexandre_royal@seduc.to.gov.br
-                                    GMAIL_PASSWORD=abcd efgh ijkl mnop
-                                    ```
-                                    """)
-                            
-                            st.session_state.aguardando_codigo = True
-                            st.rerun()
-                        else:
-                            st.error(f"❌ Erro ao enviar código: {mensagem}")
-                            st.info("💡 Verifique se o email está configurado corretamente no arquivo .env")
-                            
-                            # Mesmo com erro, permitir mostrar código para teste
-                            st.warning("⚠️ **Para teste, o código gerado foi:**")
-                            st.info(f"🔑 **{codigo_verificacao}**")
+                    st.session_state.logado = True
+                    st.session_state.usuario = usuario
+                    st.success(f"Login realizado com sucesso!")
+                    st.rerun()
                 else:
                     st.error("CPF/INEP ou senha incorretos!")
         
         # Assinatura centralizada
         st.markdown("---")
         st.markdown("<div style='text-align: center;'><strong>© 2025 – desenvolvido por Alexandre Tolentino</strong></div>", unsafe_allow_html=True)
-
-def tela_verificacao_codigo():
-    """Exibe tela de verificação de código por email"""
-    col1, col2, col3 = st.columns([1, 2, 1])
-    
-    with col2:
-        st.markdown("### 🔐 Verificação de Código")
-        st.info(f"📧 Um código de verificação foi enviado para: **{st.session_state.get('email_usuario', 'seu email')}**")
-        
-        # Mostrar código se estiver em modo de teste (email não configurado)
-        import os
-        gmail_user = os.getenv('GMAIL_USER', 'seu_email@gmail.com')
-        gmail_password = os.getenv('GMAIL_PASSWORD', '')
-        
-        if gmail_user == 'seu_email@gmail.com' or not gmail_password:
-            codigo_atual = st.session_state.get('codigo_verificacao', '')
-            if codigo_atual:
-                st.warning("⚠️ **MODO DE TESTE - Email não configurado**")
-                st.success(f"🔑 **Seu código de verificação é: {codigo_atual}**")
-                st.caption("*(Em produção, este código será enviado apenas por email)*")
-        
-        # Verificar se código expirou (10 minutos)
-        if 'codigo_timestamp' in st.session_state:
-            tempo_decorrido = (datetime.now() - st.session_state.codigo_timestamp).total_seconds()
-            tempo_restante = 600 - tempo_decorrido  # 10 minutos = 600 segundos
-            
-            if tempo_restante <= 0:
-                st.error("⏰ Código expirado! Por favor, faça login novamente.")
-                if st.button("Voltar ao Login", use_container_width=True):
-                    st.session_state.aguardando_codigo = False
-                    st.session_state.codigo_verificacao = None
-                    st.session_state.usuario_aguardando_codigo = None
-                    st.rerun()
-                return
-            else:
-                minutos = int(tempo_restante // 60)
-                segundos = int(tempo_restante % 60)
-                st.warning(f"⏱️ Código válido por mais {minutos} minuto(s) e {segundos} segundo(s)")
-        
-        with st.form("verificacao_codigo_form"):
-            codigo_digitado = st.text_input(
-                "Digite o código de 6 dígitos:", 
-                placeholder="000000",
-                max_chars=6,
-                help="Verifique sua caixa de entrada e spam"
-            )
-            
-            col_btn1, col_btn2 = st.columns(2)
-            with col_btn1:
-                verificar_btn = st.form_submit_button("✅ Verificar", use_container_width=True, type="primary")
-            with col_btn2:
-                reenviar_btn = st.form_submit_button("🔄 Reenviar Código", use_container_width=True)
-            
-            if verificar_btn:
-                if not codigo_digitado or len(codigo_digitado) != 6:
-                    st.error("❌ Por favor, digite um código de 6 dígitos!")
-                else:
-                    codigo_correto = str(st.session_state.get('codigo_verificacao', ''))
-                    if codigo_digitado == codigo_correto:
-                        # Código correto - permitir acesso
-                        st.success("✅ Código verificado com sucesso!")
-                        st.session_state.logado = True
-                        st.session_state.usuario = st.session_state.usuario_aguardando_codigo
-                        st.session_state.aguardando_codigo = False
-                        st.session_state.codigo_verificacao = None
-                        st.session_state.usuario_aguardando_codigo = None
-                        st.rerun()
-                    else:
-                        st.error("❌ Código incorreto! Verifique o código e tente novamente.")
-            
-            if reenviar_btn:
-                # Reenviar código
-                codigo_novo = gerar_codigo_verificacao()
-                st.session_state.codigo_verificacao = codigo_novo
-                st.session_state.codigo_timestamp = datetime.now()
-                
-                with st.spinner("Reenviando código de verificação..."):
-                    sucesso, mensagem = enviar_codigo_verificacao_email(
-                        st.session_state.get('email_usuario', ''),
-                        st.session_state.usuario_aguardando_codigo.get('nome', 'Usuário'),
-                        codigo_novo
-                    )
-                
-                if sucesso:
-                    st.success("✅ Novo código enviado!")
-                    st.rerun()
-                else:
-                    st.error(f"❌ Erro ao reenviar: {mensagem}")
-        
-        st.markdown("---")
-        if st.button("↩️ Voltar ao Login", use_container_width=True):
-            st.session_state.aguardando_codigo = False
-            st.session_state.codigo_verificacao = None
-            st.session_state.usuario_aguardando_codigo = None
-            st.rerun()
 
 def tela_sobre():
     """Exibe modal com informações sobre o sistema"""
@@ -839,13 +629,8 @@ def enviar_email(destinatario, assunto, corpo, anexo=None):
         gmail_user = os.getenv('GMAIL_USER', 'seu_email@gmail.com')
         gmail_password = os.getenv('GMAIL_PASSWORD', 'sua_senha_app')
         
-        # Debug: verificar se está lendo o .env
-        print(f"DEBUG EMAIL - GMAIL_USER: {gmail_user}")
-        print(f"DEBUG EMAIL - GMAIL_PASSWORD configurado: {'SIM' if gmail_password and gmail_password != 'sua_senha_app' else 'NÃO'}")
-        
         # Se não tiver configuração, usar simulação
-        if gmail_user == 'seu_email@gmail.com' or not gmail_password or gmail_password == 'sua_senha_app':
-            print("DEBUG EMAIL - Usando modo simulado (email não configurado)")
+        if gmail_user == 'seu_email@gmail.com' or not gmail_password:
             return enviar_email_simulado(destinatario, assunto, corpo, anexo)
         
         # Criar mensagem
@@ -869,33 +654,19 @@ def enviar_email(destinatario, assunto, corpo, anexo=None):
             msg.attach(part)
         
         # Enviar email
-        try:
-            server = smtplib.SMTP('smtp.gmail.com', 587)
-            server.starttls()
-            server.login(gmail_user, gmail_password)
-            text = msg.as_string()
-            server.sendmail(gmail_user, destinatario, text)
-            server.quit()
-        except smtplib.SMTPAuthenticationError as e:
-            return False, f"Erro de autenticação: Verifique se a senha de app está correta. {str(e)}"
-        except smtplib.SMTPException as e:
-            return False, f"Erro ao enviar email: {str(e)}"
-        except Exception as e:
-            return False, f"Erro inesperado: {str(e)}"
-        
-        # Obter nome do remetente se disponível (pode não estar logado ainda)
-        nome_remetente = "Sistema"
-        if 'usuario' in st.session_state and st.session_state.usuario:
-            nome_remetente = st.session_state.usuario.get('nome', 'Sistema')
-        elif 'usuario_aguardando_codigo' in st.session_state and st.session_state.usuario_aguardando_codigo:
-            nome_remetente = st.session_state.usuario_aguardando_codigo.get('nome', 'Sistema')
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.starttls()
+        server.login(gmail_user, gmail_password)
+        text = msg.as_string()
+        server.sendmail(gmail_user, destinatario, text)
+        server.quit()
         
         # Salvar log
         log_info = {
             "destinatario": destinatario,
             "assunto": assunto,
             "data": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
-            "remetente": nome_remetente,
+            "remetente": st.session_state.usuario['nome'],
             "status": "Enviado (Real)"
         }
         
@@ -916,19 +687,12 @@ def enviar_email_simulado(destinatario, assunto, corpo, anexo=None):
         import time
         time.sleep(1)  # Simular processamento
         
-        # Obter nome do remetente se disponível (pode não estar logado ainda)
-        nome_remetente = "Sistema"
-        if 'usuario' in st.session_state and st.session_state.usuario:
-            nome_remetente = st.session_state.usuario.get('nome', 'Sistema')
-        elif 'usuario_aguardando_codigo' in st.session_state and st.session_state.usuario_aguardando_codigo:
-            nome_remetente = st.session_state.usuario_aguardando_codigo.get('nome', 'Sistema')
-        
         # Salvar informações do "envio" em um arquivo de log
         log_info = {
             "destinatario": destinatario,
             "assunto": assunto,
             "data": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
-            "remetente": nome_remetente,
+            "remetente": st.session_state.usuario['nome'],
             "status": "Enviado (Simulado)"
         }
         
