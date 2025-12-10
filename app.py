@@ -10,7 +10,8 @@ import hashlib
 import re
 from datetime import datetime
 import os
-import math
+import random
+import json
 
 # Carregar variáveis de ambiente
 try:
@@ -49,73 +50,6 @@ except ImportError:
     MONITORING_AVAILABLE = False
 
 # -----------------------------
-# Coordenadas GPS das Cidades Permitidas
-# -----------------------------
-# Formato: (latitude, longitude, raio_km)
-CIDADES_PERMITIDAS_GPS = {
-    "Gurupi": {
-        "lat": -11.728627185427838,
-        "lon": -49.06801827560702,
-        "raio_km": 30
-    }
-    # Adicionar outras cidades depois se funcionar
-}
-
-# Configuração: Desabilitar validação de localização (True = desabilitado, False = habilitado)
-DESABILITAR_VALIDACAO_LOCALIZACAO = False
-
-# -----------------------------
-# Funções de Cálculo de Distância GPS
-# -----------------------------
-def calcular_distancia_km(lat1, lon1, lat2, lon2):
-    """
-    Calcula a distância entre duas coordenadas GPS usando a fórmula de Haversine
-    Retorna a distância em quilômetros
-    """
-    # Raio da Terra em quilômetros
-    R = 6371.0
-    
-    # Converter graus para radianos
-    lat1_rad = math.radians(lat1)
-    lon1_rad = math.radians(lon1)
-    lat2_rad = math.radians(lat2)
-    lon2_rad = math.radians(lon2)
-    
-    # Diferenças
-    dlat = lat2_rad - lat1_rad
-    dlon = lon2_rad - lon1_rad
-    
-    # Fórmula de Haversine
-    a = math.sin(dlat / 2)**2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(dlon / 2)**2
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    
-    distancia = R * c
-    return distancia
-
-def verificar_localizacao_gps_permitida(latitude, longitude):
-    """
-    Verifica se as coordenadas GPS estão dentro do raio permitido de alguma cidade
-    Retorna (True/False, cidade, distancia_km)
-    """
-    if latitude is None or longitude is None:
-        return False, None, None
-    
-    # Verificar distância até cada cidade permitida
-    for cidade, dados in CIDADES_PERMITIDAS_GPS.items():
-        lat_cidade = dados["lat"]
-        lon_cidade = dados["lon"]
-        raio_km = dados["raio_km"]
-        
-        distancia = calcular_distancia_km(latitude, longitude, lat_cidade, lon_cidade)
-        
-        # Se estiver dentro do raio permitido, retorna True
-        if distancia <= raio_km:
-            return True, cidade, distancia
-    
-    # Não está dentro do raio de nenhuma cidade
-    return False, None, None
-
-# -----------------------------
 # Sistema de Autenticação
 # -----------------------------
 def carregar_usuarios():
@@ -152,6 +86,36 @@ def _has_recent_access(usuario_nome):
         print(f"Erro ao verificar acesso recente: {e}")
         return False
 
+def gerar_codigo_verificacao():
+    """Gera um código de verificação de 6 dígitos"""
+    return str(random.randint(100000, 999999))
+
+def enviar_codigo_verificacao_email(email_usuario, nome_usuario, codigo):
+    """Envia código de verificação por email"""
+    assunto = "Código de Verificação - Painel SGE"
+    corpo = f"""
+Olá {nome_usuario},
+
+Você está tentando acessar o Painel SGE.
+
+Seu código de verificação é:
+
+    {codigo}
+
+Este código é válido por 10 minutos.
+
+Se você não solicitou este acesso, ignore este email.
+
+Atenciosamente,
+Sistema Painel SGE
+"""
+    
+    try:
+        sucesso, mensagem = enviar_email(email_usuario, assunto, corpo)
+        return sucesso, mensagem
+    except Exception as e:
+        return False, f"Erro ao enviar código: {str(e)}"
+
 def autenticar_usuario(identificador, senha):
     """Autentica usuário com CPF ou INEP e senha"""
     df_usuarios = carregar_usuarios()
@@ -178,67 +142,12 @@ def autenticar_usuario(identificador, senha):
         if (cpf_usuario and cpf_usuario == id_limpo) or (inep_usuario and inep_usuario == id_limpo):
             # Verificar senha (comparação direta)
             if str(usuario.get('SENHA', '')) == str(senha):
-                # Validar localização GPS antes de permitir login
-                if not DESABILITAR_VALIDACAO_LOCALIZACAO:
-                    try:
-                        # Obter coordenadas GPS da sessão (obtidas via JavaScript)
-                        latitude = st.session_state.get('gps_latitude')
-                        longitude = st.session_state.get('gps_longitude')
-                        geo_error = st.session_state.get('geo_error')
-                        
-                        if latitude and longitude:
-                            # Coordenadas GPS obtidas - validar distância
-                            permitido, cidade, distancia = verificar_localizacao_gps_permitida(latitude, longitude)
-                            
-                            if not permitido:
-                                # Não está dentro do raio permitido - BLOQUEAR
-                                return {
-                                    'erro': 'localizacao',
-                                    'cidade': 'Fora do raio',
-                                    'mensagem': f'Acesso restrito. Sua localização está fora do raio permitido de 30 km de Gurupi.'
-                                }
-                            # Se permitido, continua normalmente
-                        elif geo_error:
-                            # Erro ao obter localização GPS
-                            if geo_error == '1':  # PERMISSION_DENIED
-                                return {
-                                    'erro': 'localizacao',
-                                    'cidade': 'Permissão negada',
-                                    'mensagem': 'É necessário permitir o acesso à sua localização GPS para acessar o sistema. Por favor, recarregue a página e permita o acesso quando solicitado.'
-                                }
-                            elif geo_error == '2':  # POSITION_UNAVAILABLE
-                                return {
-                                    'erro': 'localizacao',
-                                    'cidade': 'Indisponível',
-                                    'mensagem': 'Não foi possível determinar sua localização GPS. Verifique se o GPS está ativado e tente novamente.'
-                                }
-                            elif geo_error == '3':  # TIMEOUT
-                                return {
-                                    'erro': 'localizacao',
-                                    'cidade': 'Timeout',
-                                    'mensagem': 'Tempo esgotado ao obter sua localização GPS. Por favor, tente novamente.'
-                                }
-                            else:  # not_supported ou outro erro
-                                return {
-                                    'erro': 'localizacao',
-                                    'cidade': 'Erro',
-                                    'mensagem': 'Não foi possível verificar sua localização GPS. Seu navegador pode não suportar geolocalização ou você precisa permitir o acesso.'
-                                }
-                        else:
-                            # Ainda não obteve localização - aguardar
-                            return {
-                                'erro': 'localizacao',
-                                'cidade': 'Aguardando',
-                                'mensagem': 'Aguardando permissão de localização GPS. Por favor, permita o acesso à sua localização quando solicitado pelo navegador.'
-                            }
-                    except Exception as e:
-                        # Erro na validação - BLOQUEAR por segurança
-                        print(f"Erro ao validar localização GPS: {e}")
-                        return {
-                            'erro': 'localizacao',
-                            'cidade': 'Erro',
-                            'mensagem': 'Erro ao verificar localização GPS. Acesso negado por segurança.'
-                        }
+                # Obter email do usuário (pode estar em diferentes colunas)
+                email_usuario = None
+                for col in ['EMAIL', 'E-MAIL', 'Email', 'e-mail', 'email']:
+                    if col in usuario and pd.notna(usuario.get(col)) and str(usuario.get(col)).strip():
+                        email_usuario = str(usuario.get(col)).strip()
+                        break
                 
                 # Registrar acesso apenas no momento do login
                 if MONITORING_AVAILABLE:
@@ -258,7 +167,8 @@ def autenticar_usuario(identificador, senha):
                     'cpf': cpf_usuario if cpf_usuario else None,
                     'inep': inep_usuario if inep_usuario else None,
                     'senha_atual': str(usuario.get('SENHA', '')),
-                    'linha': _
+                    'linha': _,
+                    'email': email_usuario
                 }
     return None
 
@@ -472,82 +382,9 @@ def tela_instrucoes():
 
 def tela_login():
     """Exibe tela de login"""
-    # JavaScript para obter localização GPS do cliente
-    query_params = st.query_params
-    
-    # Verificar se já tem coordenadas GPS
-    if 'lat' in query_params and 'lon' in query_params:
-        try:
-            st.session_state.gps_latitude = float(query_params['lat'])
-            st.session_state.gps_longitude = float(query_params['lon'])
-            st.query_params.clear()
-            st.rerun()
-        except:
-            pass
-    elif 'geo_error' in query_params:
-        st.session_state.geo_error = query_params['geo_error']
-        st.query_params.clear()
-    
-    # Se ainda não tem coordenadas GPS, solicitar
-    if 'gps_latitude' not in st.session_state or 'gps_longitude' not in st.session_state:
-        # Mostrar mensagem informativa
-        st.warning("📍 **Permissão de Localização GPS Necessária**\n\nPara acessar o sistema, é necessário permitir o acesso à sua localização GPS. O navegador irá solicitar sua permissão.")
-        
-        # Botão manual para tentar novamente
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            if st.button("🔄 Tentar Obter Localização GPS", use_container_width=True, type="primary"):
-                st.session_state.tentar_gps = True
-                st.rerun()
-        
-        # JavaScript para solicitar localização GPS automaticamente
-        if st.session_state.get('tentar_gps', True):
-            st.markdown("""
-            <script>
-            (function() {
-                console.log('🔍 Iniciando solicitação de localização GPS...');
-                
-                if (navigator.geolocation) {
-                    console.log('✅ Geolocalização disponível no navegador');
-                    
-                    navigator.geolocation.getCurrentPosition(
-                        function(position) {
-                            const lat = position.coords.latitude;
-                            const lon = position.coords.longitude;
-                            console.log('✅ Localização GPS obtida com sucesso!');
-                            console.log('📍 Latitude:', lat);
-                            console.log('📍 Longitude:', lon);
-                            
-                            const url = new URL(window.location);
-                            url.searchParams.set('lat', lat.toString());
-                            url.searchParams.set('lon', lon.toString());
-                            console.log('🔄 Redirecionando com coordenadas...');
-                            window.location.href = url.toString();
-                        },
-                        function(error) {
-                            console.error('❌ Erro ao obter localização GPS');
-                            console.error('Código do erro:', error.code);
-                            console.error('Mensagem:', error.message);
-                            
-                            const url = new URL(window.location);
-                            url.searchParams.set('geo_error', error.code.toString());
-                            window.location.href = url.toString();
-                        },
-                        {
-                            enableHighAccuracy: true,
-                            timeout: 30000,
-                            maximumAge: 0
-                        }
-                    );
-                } else {
-                    console.error('❌ Geolocalização NÃO disponível no navegador');
-                    const url = new URL(window.location);
-                    url.searchParams.set('geo_error', 'not_supported');
-                    window.location.href = url.toString();
-                }
-            })();
-            </script>
-            """, unsafe_allow_html=True)
+    # Verificar se está aguardando código de verificação
+    if st.session_state.get('aguardando_codigo', False):
+        return tela_verificacao_codigo()
     
     # CSS para botão de instruções maior
     st.markdown("""
@@ -605,21 +442,122 @@ def tela_login():
             else:
                 usuario = autenticar_usuario(identificador, senha)
                 if usuario:
-                    # Verificar se há erro de localização
-                    if isinstance(usuario, dict) and usuario.get('erro') == 'localizacao':
-                        st.error(f"🚫 {usuario.get('mensagem', 'Acesso negado por localização.')}")
-                        st.info("💡 Se você acredita que isso é um erro, entre em contato com o administrador do sistema.")
+                    # Verificar se tem email cadastrado
+                    email_usuario = usuario.get('email')
+                    if not email_usuario:
+                        st.error("❌ Email não encontrado na planilha! Por favor, adicione seu email na coluna 'EMAIL' ou 'E-MAIL' da planilha.")
                     else:
-                        st.session_state.logado = True
-                        st.session_state.usuario = usuario
-                        st.success(f"Login realizado com sucesso!")
-                        st.rerun()
+                        # Gerar código de verificação
+                        codigo_verificacao = gerar_codigo_verificacao()
+                        st.session_state.codigo_verificacao = codigo_verificacao
+                        st.session_state.usuario_aguardando_codigo = usuario
+                        st.session_state.email_usuario = email_usuario
+                        st.session_state.codigo_timestamp = datetime.now()
+                        
+                        # Enviar código por email
+                        with st.spinner("Enviando código de verificação por email..."):
+                            sucesso, mensagem = enviar_codigo_verificacao_email(
+                                email_usuario, 
+                                usuario.get('nome', 'Usuário'), 
+                                codigo_verificacao
+                            )
+                        
+                        if sucesso:
+                            st.success(f"✅ Código de verificação enviado para {email_usuario}")
+                            st.session_state.aguardando_codigo = True
+                            st.rerun()
+                        else:
+                            st.error(f"❌ Erro ao enviar código: {mensagem}")
+                            st.info("💡 Verifique se o email está configurado corretamente no arquivo .env")
                 else:
                     st.error("CPF/INEP ou senha incorretos!")
         
         # Assinatura centralizada
         st.markdown("---")
         st.markdown("<div style='text-align: center;'><strong>© 2025 – desenvolvido por Alexandre Tolentino</strong></div>", unsafe_allow_html=True)
+
+def tela_verificacao_codigo():
+    """Exibe tela de verificação de código por email"""
+    col1, col2, col3 = st.columns([1, 2, 1])
+    
+    with col2:
+        st.markdown("### 🔐 Verificação de Código")
+        st.info(f"📧 Um código de verificação foi enviado para: **{st.session_state.get('email_usuario', 'seu email')}**")
+        
+        # Verificar se código expirou (10 minutos)
+        if 'codigo_timestamp' in st.session_state:
+            tempo_decorrido = (datetime.now() - st.session_state.codigo_timestamp).total_seconds()
+            tempo_restante = 600 - tempo_decorrido  # 10 minutos = 600 segundos
+            
+            if tempo_restante <= 0:
+                st.error("⏰ Código expirado! Por favor, faça login novamente.")
+                if st.button("Voltar ao Login", use_container_width=True):
+                    st.session_state.aguardando_codigo = False
+                    st.session_state.codigo_verificacao = None
+                    st.session_state.usuario_aguardando_codigo = None
+                    st.rerun()
+                return
+            else:
+                minutos = int(tempo_restante // 60)
+                segundos = int(tempo_restante % 60)
+                st.warning(f"⏱️ Código válido por mais {minutos} minuto(s) e {segundos} segundo(s)")
+        
+        with st.form("verificacao_codigo_form"):
+            codigo_digitado = st.text_input(
+                "Digite o código de 6 dígitos:", 
+                placeholder="000000",
+                max_chars=6,
+                help="Verifique sua caixa de entrada e spam"
+            )
+            
+            col_btn1, col_btn2 = st.columns(2)
+            with col_btn1:
+                verificar_btn = st.form_submit_button("✅ Verificar", use_container_width=True, type="primary")
+            with col_btn2:
+                reenviar_btn = st.form_submit_button("🔄 Reenviar Código", use_container_width=True)
+            
+            if verificar_btn:
+                if not codigo_digitado or len(codigo_digitado) != 6:
+                    st.error("❌ Por favor, digite um código de 6 dígitos!")
+                else:
+                    codigo_correto = str(st.session_state.get('codigo_verificacao', ''))
+                    if codigo_digitado == codigo_correto:
+                        # Código correto - permitir acesso
+                        st.success("✅ Código verificado com sucesso!")
+                        st.session_state.logado = True
+                        st.session_state.usuario = st.session_state.usuario_aguardando_codigo
+                        st.session_state.aguardando_codigo = False
+                        st.session_state.codigo_verificacao = None
+                        st.session_state.usuario_aguardando_codigo = None
+                        st.rerun()
+                    else:
+                        st.error("❌ Código incorreto! Verifique o código e tente novamente.")
+            
+            if reenviar_btn:
+                # Reenviar código
+                codigo_novo = gerar_codigo_verificacao()
+                st.session_state.codigo_verificacao = codigo_novo
+                st.session_state.codigo_timestamp = datetime.now()
+                
+                with st.spinner("Reenviando código de verificação..."):
+                    sucesso, mensagem = enviar_codigo_verificacao_email(
+                        st.session_state.get('email_usuario', ''),
+                        st.session_state.usuario_aguardando_codigo.get('nome', 'Usuário'),
+                        codigo_novo
+                    )
+                
+                if sucesso:
+                    st.success("✅ Novo código enviado!")
+                    st.rerun()
+                else:
+                    st.error(f"❌ Erro ao reenviar: {mensagem}")
+        
+        st.markdown("---")
+        if st.button("↩️ Voltar ao Login", use_container_width=True):
+            st.session_state.aguardando_codigo = False
+            st.session_state.codigo_verificacao = None
+            st.session_state.usuario_aguardando_codigo = None
+            st.rerun()
 
 def tela_sobre():
     """Exibe modal com informações sobre o sistema"""
