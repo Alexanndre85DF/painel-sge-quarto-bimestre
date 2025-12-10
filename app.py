@@ -474,6 +474,32 @@ def tela_login():
                                 # Modo simulado - mostrar código na tela para teste
                                 st.warning(f"⚠️ **MODO DE TESTE - Email não configurado**")
                                 st.info(f"🔑 **Seu código de verificação é: {codigo_verificacao}**\n\n*(Em produção, este código será enviado apenas por email)*")
+                                
+                                # Instruções para configurar email
+                                with st.expander("📧 Como configurar envio de email real"):
+                                    st.markdown("""
+                                    **Para enviar códigos por email de verdade:**
+                                    
+                                    1. **Crie um arquivo `.env`** na pasta do projeto com:
+                                    ```
+                                    GMAIL_USER=seu_email@gmail.com
+                                    GMAIL_PASSWORD=sua_senha_app
+                                    ```
+                                    
+                                    2. **Gere uma senha de app do Gmail:**
+                                    - Acesse: https://myaccount.google.com/security
+                                    - Ative "Verificação em duas etapas" (se não tiver)
+                                    - Vá em "Senhas de app" → Gere uma nova
+                                    - Use essa senha no `.env` (não sua senha normal!)
+                                    
+                                    3. **Reinicie o Streamlit** após criar o `.env`
+                                    
+                                    **Exemplo de arquivo `.env`:**
+                                    ```
+                                    GMAIL_USER=alexandre_royal@seduc.to.gov.br
+                                    GMAIL_PASSWORD=abcd efgh ijkl mnop
+                                    ```
+                                    """)
                             
                             st.session_state.aguardando_codigo = True
                             st.rerun()
