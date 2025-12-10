@@ -16,9 +16,16 @@ import json
 # Carregar variáveis de ambiente
 try:
     from dotenv import load_dotenv
-    load_dotenv()
+    # Carregar .env explicitamente do diretório atual
+    import os as os_module
+    env_path = os_module.path.join(os_module.path.dirname(__file__), '.env')
+    load_dotenv(dotenv_path=env_path)
+    print(f"DEBUG - Tentando carregar .env de: {env_path}")
+    print(f"DEBUG - Arquivo .env existe: {os_module.path.exists(env_path)}")
 except ImportError:
-    pass  # dotenv não instalado
+    print("DEBUG - python-dotenv não instalado! Execute: pip install python-dotenv")
+except Exception as e:
+    print(f"DEBUG - Erro ao carregar .env: {e}")
 
 # Importações opcionais para funcionalidades de email/WhatsApp
 try:
@@ -832,8 +839,13 @@ def enviar_email(destinatario, assunto, corpo, anexo=None):
         gmail_user = os.getenv('GMAIL_USER', 'seu_email@gmail.com')
         gmail_password = os.getenv('GMAIL_PASSWORD', 'sua_senha_app')
         
+        # Debug: verificar se está lendo o .env
+        print(f"DEBUG EMAIL - GMAIL_USER: {gmail_user}")
+        print(f"DEBUG EMAIL - GMAIL_PASSWORD configurado: {'SIM' if gmail_password and gmail_password != 'sua_senha_app' else 'NÃO'}")
+        
         # Se não tiver configuração, usar simulação
-        if gmail_user == 'seu_email@gmail.com' or not gmail_password:
+        if gmail_user == 'seu_email@gmail.com' or not gmail_password or gmail_password == 'sua_senha_app':
+            print("DEBUG EMAIL - Usando modo simulado (email não configurado)")
             return enviar_email_simulado(destinatario, assunto, corpo, anexo)
         
         # Criar mensagem
