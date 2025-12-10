@@ -811,12 +811,19 @@ def enviar_email(destinatario, assunto, corpo, anexo=None):
         server.sendmail(gmail_user, destinatario, text)
         server.quit()
         
+        # Obter nome do remetente se disponível (pode não estar logado ainda)
+        nome_remetente = "Sistema"
+        if 'usuario' in st.session_state and st.session_state.usuario:
+            nome_remetente = st.session_state.usuario.get('nome', 'Sistema')
+        elif 'usuario_aguardando_codigo' in st.session_state and st.session_state.usuario_aguardando_codigo:
+            nome_remetente = st.session_state.usuario_aguardando_codigo.get('nome', 'Sistema')
+        
         # Salvar log
         log_info = {
             "destinatario": destinatario,
             "assunto": assunto,
             "data": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
-            "remetente": st.session_state.usuario['nome'],
+            "remetente": nome_remetente,
             "status": "Enviado (Real)"
         }
         
@@ -837,12 +844,19 @@ def enviar_email_simulado(destinatario, assunto, corpo, anexo=None):
         import time
         time.sleep(1)  # Simular processamento
         
+        # Obter nome do remetente se disponível (pode não estar logado ainda)
+        nome_remetente = "Sistema"
+        if 'usuario' in st.session_state and st.session_state.usuario:
+            nome_remetente = st.session_state.usuario.get('nome', 'Sistema')
+        elif 'usuario_aguardando_codigo' in st.session_state and st.session_state.usuario_aguardando_codigo:
+            nome_remetente = st.session_state.usuario_aguardando_codigo.get('nome', 'Sistema')
+        
         # Salvar informações do "envio" em um arquivo de log
         log_info = {
             "destinatario": destinatario,
             "assunto": assunto,
             "data": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
-            "remetente": st.session_state.usuario['nome'],
+            "remetente": nome_remetente,
             "status": "Enviado (Simulado)"
         }
         
