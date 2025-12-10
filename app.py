@@ -464,11 +464,26 @@ def tela_login():
                         
                         if sucesso:
                             st.success(f"✅ Código de verificação enviado para {email_usuario}")
+                            
+                            # Verificar se está em modo simulado e mostrar código na tela
+                            import os
+                            gmail_user = os.getenv('GMAIL_USER', 'seu_email@gmail.com')
+                            gmail_password = os.getenv('GMAIL_PASSWORD', '')
+                            
+                            if gmail_user == 'seu_email@gmail.com' or not gmail_password:
+                                # Modo simulado - mostrar código na tela para teste
+                                st.warning(f"⚠️ **MODO DE TESTE - Email não configurado**")
+                                st.info(f"🔑 **Seu código de verificação é: {codigo_verificacao}**\n\n*(Em produção, este código será enviado apenas por email)*")
+                            
                             st.session_state.aguardando_codigo = True
                             st.rerun()
                         else:
                             st.error(f"❌ Erro ao enviar código: {mensagem}")
                             st.info("💡 Verifique se o email está configurado corretamente no arquivo .env")
+                            
+                            # Mesmo com erro, permitir mostrar código para teste
+                            st.warning("⚠️ **Para teste, o código gerado foi:**")
+                            st.info(f"🔑 **{codigo_verificacao}**")
                 else:
                     st.error("CPF/INEP ou senha incorretos!")
         
@@ -483,6 +498,18 @@ def tela_verificacao_codigo():
     with col2:
         st.markdown("### 🔐 Verificação de Código")
         st.info(f"📧 Um código de verificação foi enviado para: **{st.session_state.get('email_usuario', 'seu email')}**")
+        
+        # Mostrar código se estiver em modo de teste (email não configurado)
+        import os
+        gmail_user = os.getenv('GMAIL_USER', 'seu_email@gmail.com')
+        gmail_password = os.getenv('GMAIL_PASSWORD', '')
+        
+        if gmail_user == 'seu_email@gmail.com' or not gmail_password:
+            codigo_atual = st.session_state.get('codigo_verificacao', '')
+            if codigo_atual:
+                st.warning("⚠️ **MODO DE TESTE - Email não configurado**")
+                st.success(f"🔑 **Seu código de verificação é: {codigo_atual}**")
+                st.caption("*(Em produção, este código será enviado apenas por email)*")
         
         # Verificar se código expirou (10 minutos)
         if 'codigo_timestamp' in st.session_state:
@@ -804,12 +831,19 @@ def enviar_email(destinatario, assunto, corpo, anexo=None):
             msg.attach(part)
         
         # Enviar email
-        server = smtplib.SMTP('smtp.gmail.com', 587)
-        server.starttls()
-        server.login(gmail_user, gmail_password)
-        text = msg.as_string()
-        server.sendmail(gmail_user, destinatario, text)
-        server.quit()
+        try:
+            server = smtplib.SMTP('smtp.gmail.com', 587)
+            server.starttls()
+            server.login(gmail_user, gmail_password)
+            text = msg.as_string()
+            server.sendmail(gmail_user, destinatario, text)
+            server.quit()
+        except smtplib.SMTPAuthenticationError as e:
+            return False, f"Erro de autenticação: Verifique se a senha de app está correta. {str(e)}"
+        except smtplib.SMTPException as e:
+            return False, f"Erro ao enviar email: {str(e)}"
+        except Exception as e:
+            return False, f"Erro inesperado: {str(e)}"
         
         # Obter nome do remetente se disponível (pode não estar logado ainda)
         nome_remetente = "Sistema"
