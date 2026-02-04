@@ -90,13 +90,23 @@ def autenticar_usuario(identificador, senha):
     if df_usuarios is None:
         return None
     
-    # Normalizar identificador (remover pontos, traços, espaços)
+    # Normalizar identificador (remover pontos, traços, espaços) - aceita apenas números
     id_limpo = re.sub(r'[^0-9]', '', str(identificador))
+    if not id_limpo:
+        return None
     
     # Buscar usuário na planilha
     for _, usuario in df_usuarios.iterrows():
-        # Verificar CPF
-        cpf_usuario = re.sub(r'[^0-9]', '', str(usuario.get('CPF', '')))
+        # Verificar CPF - remover formatação e tratar como string para preservar zeros à esquerda
+        cpf_valor = usuario.get('CPF', '')
+        if pd.isna(cpf_valor) or cpf_valor == '':
+            cpf_usuario = ''
+        else:
+            # Converter para string primeiro (importante para CPFs com zeros à esquerda)
+            cpf_str = str(cpf_valor)
+            # Remover formatação (pontos, traços, espaços)
+            cpf_usuario = re.sub(r'[^0-9]', '', cpf_str)
+        
         # Verificar INEP - tratar NaN e float
         inep_valor = usuario.get('INEP', '')
         if pd.isna(inep_valor) or inep_valor == '':
@@ -106,7 +116,7 @@ def autenticar_usuario(identificador, senha):
             inep_str = str(int(float(inep_valor)))
             inep_usuario = re.sub(r'[^0-9]', '', inep_str)
         
-        # Comparar com CPF ou INEP
+        # Comparar com CPF ou INEP (comparação exata de strings)
         if (cpf_usuario and cpf_usuario == id_limpo) or (inep_usuario and inep_usuario == id_limpo):
             # Verificar senha (comparação direta)
             if str(usuario.get('SENHA', '')) == str(senha):
@@ -139,12 +149,22 @@ def alterar_senha(identificador, senha_atual, nova_senha):
         if df_usuarios is None:
             return False, "Erro ao carregar planilha"
         
+        # Normalizar identificador (remover pontos, traços, espaços) - aceita apenas números
         id_limpo = re.sub(r'[^0-9]', '', str(identificador))
+        if not id_limpo:
+            return False, "Identificador inválido"
         
         # Encontrar usuário
         for idx, usuario in df_usuarios.iterrows():
-            # Verificar CPF
-            cpf_usuario = re.sub(r'[^0-9]', '', str(usuario.get('CPF', '')))
+            # Verificar CPF - remover formatação e tratar como string para preservar zeros à esquerda
+            cpf_valor = usuario.get('CPF', '')
+            if pd.isna(cpf_valor) or cpf_valor == '':
+                cpf_usuario = ''
+            else:
+                # Converter para string primeiro (importante para CPFs com zeros à esquerda)
+                cpf_str = str(cpf_valor)
+                # Remover formatação (pontos, traços, espaços)
+                cpf_usuario = re.sub(r'[^0-9]', '', cpf_str)
             # Verificar INEP - tratar NaN e float
             inep_valor = usuario.get('INEP', '')
             if pd.isna(inep_valor) or inep_valor == '':
@@ -154,7 +174,7 @@ def alterar_senha(identificador, senha_atual, nova_senha):
                 inep_str = str(int(float(inep_valor)))
                 inep_usuario = re.sub(r'[^0-9]', '', inep_str)
             
-            # Comparar com CPF ou INEP
+            # Comparar com CPF ou INEP (comparação exata de strings)
             if (cpf_usuario and cpf_usuario == id_limpo) or (inep_usuario and inep_usuario == id_limpo):
                 if str(usuario.get('SENHA', '')) == str(senha_atual):
                     # Atualizar senha
@@ -380,7 +400,7 @@ def tela_login():
         st.info("Aceita CPF (pessoas) ou INEP (escolas)")
         
         with st.form("login_form"):
-            identificador = st.text_input("CPF ou INEP:", placeholder="Digite seu CPF ou INEP da escola", help="Digite apenas números")
+            identificador = st.text_input("CPF ou INEP:", placeholder="Digite apenas números (sem pontos ou traços)", help="Digite apenas números, sem pontos ou traços. Exemplo: 12345678901")
             senha = st.text_input("Senha:", type="password", placeholder="Digite sua senha")
             
             col_btn1, col_btn2 = st.columns(2)
@@ -393,10 +413,13 @@ def tela_login():
         if login_btn:
             if not identificador or not senha:
                 st.error("Por favor, preencha todos os campos!")
-            elif len(re.sub(r'[^0-9]', '', identificador)) < 8:
-                st.error("CPF/INEP inválido! Digite pelo menos 8 números.")
             else:
-                usuario = autenticar_usuario(identificador, senha)
+                # Remover formatação do identificador (aceita apenas números)
+                id_limpo = re.sub(r'[^0-9]', '', str(identificador))
+                if len(id_limpo) < 8:
+                    st.error("CPF/INEP inválido! Digite pelo menos 8 números (sem pontos ou traços).")
+                else:
+                    usuario = autenticar_usuario(id_limpo, senha)
                 if usuario:
                     st.session_state.logado = True
                     st.session_state.usuario = usuario
