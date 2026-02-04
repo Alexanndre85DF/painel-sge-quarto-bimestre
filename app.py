@@ -961,6 +961,10 @@ def processar_censo_escolar(df):
         if col in df.columns:
             df[col] = df[col].astype(str).str.strip()
     
+    # Limpar formatação do CPF (remover pontos e traços)
+    if 'CPF' in df.columns:
+        df['CPF'] = df['CPF'].astype(str).apply(lambda x: re.sub(r'[^0-9]', '', x) if pd.notna(x) and x != 'nan' else x)
+    
     # Marcar tipo de planilha
     df.attrs['tipo_planilha'] = 'censo_escolar'
     
@@ -1095,11 +1099,12 @@ def criar_interface_censo_escolar(df):
                     
                     # Para cada escola do estudante, mostrar a turma correspondente
                     for _, linha in dados_estudante.iterrows():
+                        cpf_limpo = re.sub(r'[^0-9]', '', str(linha['CPF'])) if 'CPF' in linha and pd.notna(linha['CPF']) else 'N/A'
                         duplicatas_escola_detalhadas.append({
                             'Nome': nome,
                             'Escola': linha['Escola'],
                             'Turma': linha['Turma'] if 'Turma' in linha else 'N/A',
-                            'CPF': linha['CPF'] if 'CPF' in linha else 'N/A',
+                            'CPF': cpf_limpo,
                             'Situacao': linha['Situacao'] if 'Situacao' in linha else 'N/A'
                         })
                 
@@ -1120,11 +1125,12 @@ def criar_interface_censo_escolar(df):
                     
                     # Para cada turma do estudante na mesma escola
                     for _, linha in dados_estudante.iterrows():
+                        cpf_limpo = re.sub(r'[^0-9]', '', str(linha['CPF'])) if 'CPF' in linha and pd.notna(linha['CPF']) else 'N/A'
                         duplicatas_turma_detalhadas.append({
                             'Nome': nome,
                             'Escola': escola,
                             'Turma': linha['Turma'] if 'Turma' in linha else 'N/A',
-                            'CPF': linha['CPF'] if 'CPF' in linha else 'N/A',
+                            'CPF': cpf_limpo,
                             'Situacao': linha['Situacao'] if 'Situacao' in linha else 'N/A'
                         })
                 
@@ -1152,11 +1158,12 @@ def criar_interface_censo_escolar(df):
                             
                             # Para cada escola do estudante, mostrar a turma correspondente
                             for _, linha in dados_estudante.iterrows():
+                                cpf_limpo = re.sub(r'[^0-9]', '', str(linha['CPF'])) if 'CPF' in linha and pd.notna(linha['CPF']) else 'N/A'
                                 duplicatas_escola_download.append({
                                     'Nome': nome,
                                     'Escola': linha['Escola'],
                                     'Turma': linha['Turma'] if 'Turma' in linha else 'N/A',
-                                    'CPF': linha['CPF'] if 'CPF' in linha else 'N/A',
+                                    'CPF': cpf_limpo,
                                     'Situacao': linha['Situacao'] if 'Situacao' in linha else 'N/A'
                                 })
                         
@@ -1174,11 +1181,12 @@ def criar_interface_censo_escolar(df):
                             
                             # Para cada turma do estudante na mesma escola
                             for _, linha in dados_estudante.iterrows():
+                                cpf_limpo = re.sub(r'[^0-9]', '', str(linha['CPF'])) if 'CPF' in linha and pd.notna(linha['CPF']) else 'N/A'
                                 duplicatas_turma_download.append({
                                     'Nome': nome,
                                     'Escola': escola,
                                     'Turma': linha['Turma'] if 'Turma' in linha else 'N/A',
-                                    'CPF': linha['CPF'] if 'CPF' in linha else 'N/A',
+                                    'CPF': cpf_limpo,
                                     'Situacao': linha['Situacao'] if 'Situacao' in linha else 'N/A'
                                 })
                         
