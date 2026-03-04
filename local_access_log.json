@@ -285,5 +285,61 @@
     "user_agent": "Streamlit App",
     "timestamp": "2025-12-09T17:58:50.337410-03:00",
     "data_hora": "09/12/2025 17:58:50"
+  },
+  {
+    "usuario": "ALEXANDRE PEREIRA TOLENTINO",
+    "ip": "186.192.248.151",
+    "user_agent": "Streamlit App",
+    "timestamp": "2026-02-27T15:32:07.549000-03:00",
+    "data_hora": "27/02/2026 15:32:07"
+  },
+  {
+    "usuario": "ALEXANDRE PEREIRA TOLENTINO",
+    "ip": "128.201.17.232",
+    "user_agent": "Streamlit App",
+    "timestamp": "2026-03-03T08:38:02.375668-03:00",
+    "data_hora": "03/03/2026 08:38:02"
+  },
+  {
+    "usuario": "ALEXANDRE PEREIRA TOLENTINO (LOGOUT)",
+    "ip": "128.201.17.232",
+    "user_agent": "Streamlit App",
+    "timestamp": "2026-03-03T09:38:29.171157-03:00",
+    "data_hora": "03/03/2026 09:38:29"
+  },
+  {
+    "usuario": "ALEXANDRE PEREIRA TOLENTINO",
+    "ip": "128.201.17.232",
+    "user_agent": "Streamlit App",
+    "timestamp": "2026-03-03T09:38:40.066895-03:00",
+    "data_hora": "03/03/2026 09:38:40"
+  },
+  {
+    "usuario": "ALEXANDRE PEREIRA TOLENTINO",
+    "ip": "128.201.17.232",
+    "user_agent": "Streamlit App",
+    "timestamp": "2026-03-03T11:58:16.307646-03:00",
+    "data_hora": "03/03/2026 11:58:16"
+  },
+  {
+    "usuario": "ALEXANDRE PEREIRA TOLENTINO",
+    "ip": "131.72.217.242",
+    "user_agent": "Streamlit App",
+    "timestamp": "2026-03-03T11:58:22.505575-03:00",
+    "data_hora": "03/03/2026 11:58:22"
+  },
+  {
+    "usuario": "ALEXANDRE PEREIRA TOLENTINO",
+    "ip": "131.72.217.242",
+    "user_agent": "Streamlit App",
+    "timestamp": "2026-03-03T13:07:56.248870-03:00",
+    "data_hora": "03/03/2026 13:07:56"
+  },
+  {
+    "usuario": "ALEXANDRE PEREIRA TOLENTINO",
+    "ip": "128.201.17.232",
+    "user_agent": "Streamlit App",
+    "timestamp": "2026-03-04T10:18:26.738772-03:00",
+    "data_hora": "04/03/2026 10:18:26"
   }
 ]
