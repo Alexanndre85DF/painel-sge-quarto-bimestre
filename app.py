@@ -8,8 +8,10 @@ from openpyxl.styles import PatternFill, Font, Alignment
 from openpyxl.utils.dataframe import dataframe_to_rows
 import hashlib
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
+import json
+import secrets
 
 # Carregar variáveis de ambiente
 try:
@@ -190,6 +192,122 @@ def alterar_senha(identificador, senha_atual, nova_senha):
     except Exception as e:
         return False, f"Erro ao alterar senha: {str(e)}"
 
+
+# -----------------------------
+# Login por e-mail + código (envio do código para o e-mail)
+# -----------------------------
+CODIGOS_LOGIN_FILE = "codigos_login.json"
+CODIGO_EXPIRA_MINUTOS = 10
+
+def _carregar_codigos():
+    try:
+        if os.path.exists(CODIGOS_LOGIN_FILE):
+            with open(CODIGOS_LOGIN_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+def _salvar_codigos(data):
+    try:
+        with open(CODIGOS_LOGIN_FILE, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+def _limpar_expirados(data):
+    agora = datetime.now()
+    for email in list(data.keys()):
+        expira_str = data[email].get('expira', '')
+        try:
+            expira = datetime.strptime(expira_str, '%Y-%m-%dT%H:%M:%S')
+            if agora > expira:
+                del data[email]
+        except Exception:
+            del data[email]
+    return data
+
+def buscar_usuario_por_email(email):
+    """Busca usuário na planilha pela coluna EMAIL (ou E-mail / email)."""
+    df_usuarios = carregar_usuarios()
+    if df_usuarios is None:
+        return None
+    email_limpo = str(email).strip().lower() if email else ''
+    if not email_limpo:
+        return None
+    for _, usuario in df_usuarios.iterrows():
+        for col in ('EMAIL', 'E-mail', 'email'):
+            val = usuario.get(col, '')
+            if pd.notna(val) and str(val).strip() != '':
+                if str(val).strip().lower() == email_limpo:
+                    cpf_valor = usuario.get('CPF', '')
+                    cpf_usuario = re.sub(r'[^0-9]', '', str(cpf_valor)) if pd.notna(cpf_valor) and cpf_valor != '' else ''
+                    inep_valor = usuario.get('INEP', '')
+                    inep_usuario = ''
+                    if pd.notna(inep_valor) and inep_valor != '':
+                        inep_usuario = re.sub(r'[^0-9]', '', str(int(float(inep_valor))))
+                    return {
+                        'nome': usuario.get('NOME', 'Usuário'),
+                        'cpf': cpf_usuario or None,
+                        'inep': inep_usuario or None,
+                        'senha_atual': '',
+                        'linha': _
+                    }
+    return None
+
+def _gmail_esta_configurado():
+    gmail_user = (os.getenv('GMAIL_USER') or '').strip()
+    gmail_pass = (os.getenv('GMAIL_PASSWORD') or '').strip()
+    return bool(gmail_user and gmail_pass and gmail_user != 'seu_email@gmail.com' and gmail_pass != 'sua_senha_app')
+
+def gerar_e_enviar_codigo(email):
+    """Gera código de 6 dígitos, salva e envia por e-mail. Retorna (ok, msg, email_enviado)."""
+    usuario = buscar_usuario_por_email(email)
+    if usuario is None:
+        return False, "E-mail não cadastrado na planilha. Cadastre o e-mail na coluna EMAIL do arquivo login_senha.xlsx.", False
+    codigo = ''.join(secrets.choice('0123456789') for _ in range(6))
+    expira = datetime.now() + timedelta(minutes=CODIGO_EXPIRA_MINUTOS)
+    expira_str = expira.strftime('%Y-%m-%dT%H:%M:%S')
+    data = _limpar_expirados(_carregar_codigos())
+    data[str(email).strip().lower()] = {'codigo': codigo, 'expira': expira_str}
+    _salvar_codigos(data)
+
+    if not _gmail_esta_configurado():
+        return True, (
+            "Código gerado, mas **o e-mail não foi enviado** porque o envio não está configurado. "
+            "No **Streamlit Cloud**: Settings → Secrets → adicione **GMAIL_USER** e **GMAIL_PASSWORD** (senha de app do Gmail). "
+            "No **computador**: crie o arquivo **.env** com as mesmas variáveis. Depois solicite o código novamente."
+        ), False
+
+    assunto = "Seu código de acesso - Painel SGE"
+    corpo = f"""Olá, {usuario['nome']}!
+
+Seu código de acesso ao Painel SGE é:
+
+    {codigo}
+
+Válido por {CODIGO_EXPIRA_MINUTOS} minutos. Não compartilhe.
+
+Se não solicitou, ignore este e-mail.
+"""
+    ok, msg = enviar_email(destinatario=email, assunto=assunto, corpo=corpo, remetente_log="Sistema")
+    if ok:
+        return True, f"Código enviado para {email}. Verifique a caixa de entrada (e spam).", True
+    return False, msg, False
+
+def validar_codigo_email(email, codigo):
+    codigo_digitado = str(codigo).strip().replace(' ', '')
+    if not codigo_digitado:
+        return None
+    data = _limpar_expirados(_carregar_codigos())
+    email_key = str(email).strip().lower()
+    if email_key not in data or data[email_key].get('codigo') != codigo_digitado:
+        return None
+    del data[email_key]
+    _salvar_codigos(data)
+    return buscar_usuario_por_email(email)
+
+
 def tela_instrucoes():
     """Exibe tela de instruções de uso do sistema"""
     
@@ -361,74 +479,107 @@ def tela_instrucoes():
     st.markdown("<div style='text-align: center; padding: 2rem;'><strong style='color: #4a90e2; font-size: 1.1rem;'>© 2025 – desenvolvido por Alexandre Tolentino</strong></div>", unsafe_allow_html=True)
 
 def tela_login():
-    """Exibe tela de login"""
-    # CSS para botão de instruções maior
+    """Exibe tela de login: por INEP+senha (escolas) ou por e-mail (código enviado ao e-mail)."""
     st.markdown("""
     <style>
-    .stButton > button[kind="primary"] {
-        background-color: #1f77b4;
-        color: white;
-        border: none;
-        border-radius: 0.5rem;
-        padding: 0.75rem 1.5rem;
-        font-size: 1.1rem;
-        font-weight: 600;
-        height: auto;
-        min-height: 3rem;
-    }
-    .stButton > button[kind="primary"]:hover {
-        background-color: #0d5a8a;
-        color: white;
-    }
+    .stButton > button[kind="primary"] { background-color: #1f77b4; color: white; border: none; border-radius: 0.5rem; padding: 0.75rem 1.5rem; font-size: 1.1rem; font-weight: 600; min-height: 3rem; }
+    .stButton > button[kind="primary"]:hover { background-color: #0d5a8a; color: white; }
     </style>
     """, unsafe_allow_html=True)
     
-    # Botão de instruções no canto superior
     col_inst, col_main, col_empty = st.columns([1, 2, 1])
-    
     with col_inst:
         if st.button("Instruções", use_container_width=True, help="Como usar o sistema", type="primary", key="btn_instrucoes"):
             st.session_state.mostrar_instrucoes = True
             st.rerun()
-    
     st.markdown("---")
     
     col1, col2, col3 = st.columns([1, 2, 1])
-    
     with col2:
         st.markdown("### Acesso ao Painel SGE")
-        st.info("Aceita CPF (pessoas) ou INEP (escolas)")
         
-        with st.form("login_form"):
-            identificador = st.text_input("CPF ou INEP:", placeholder="Digite apenas números (sem pontos ou traços)", help="Digite apenas números, sem pontos ou traços. Exemplo: 12345678901")
-            senha = st.text_input("Senha:", type="password", placeholder="Digite sua senha")
-            
-            col_btn1, col_btn2 = st.columns(2)
-            with col_btn1:
-                login_btn = st.form_submit_button("Entrar", use_container_width=True)
-            with col_btn2:
-                if st.form_submit_button("Limpar", use_container_width=True):
-                    st.rerun()
+        if st.session_state.get("email_aguardando_codigo"):
+            tipo_acesso = "E-mail (código enviado ao e-mail)"
+        else:
+            tipo_acesso = st.radio(
+                "Como deseja entrar?",
+                ["INEP + senha (escolas)", "E-mail (código enviado ao e-mail)"],
+                horizontal=True,
+                key="tipo_acesso_login"
+            )
         
-        if login_btn:
-            if not identificador or not senha:
-                st.error("Por favor, preencha todos os campos!")
+        # ---------- INEP + senha (escolas) ----------
+        if tipo_acesso == "INEP + senha (escolas)":
+            st.info("Digite INEP (ou CPF) e a senha.")
+            with st.form("login_form"):
+                identificador = st.text_input("CPF ou INEP:", placeholder="Apenas números")
+                senha = st.text_input("Senha:", type="password", placeholder="Sua senha")
+                login_btn = st.form_submit_button("Entrar")
+            if login_btn:
+                if not identificador or not senha:
+                    st.error("Preencha todos os campos.")
+                else:
+                    id_limpo = re.sub(r'[^0-9]', '', str(identificador))
+                    if len(id_limpo) < 8:
+                        st.error("CPF/INEP inválido. Use pelo menos 8 números.")
+                    else:
+                        usuario = autenticar_usuario(id_limpo, senha)
+                        if usuario:
+                            st.session_state.logado = True
+                            st.session_state.usuario = usuario
+                            st.success("Login realizado com sucesso!")
+                            st.rerun()
+                        else:
+                            st.error("CPF/INEP ou senha incorretos.")
+        
+        # ---------- E-mail: enviar código para o e-mail ----------
+        else:
+            email_aguardando = st.session_state.get("email_aguardando_codigo") or ""
+            if not email_aguardando:
+                st.info("Informe seu e-mail. Um código de acesso será enviado para esse e-mail.")
+                with st.form("login_form_email"):
+                    email_digitado = st.text_input("E-mail:", placeholder="seu_email@exemplo.com", key="email_login")
+                    enviar_btn = st.form_submit_button("Enviar código por e-mail")
+                if enviar_btn:
+                    email = (email_digitado or "").strip()
+                    if not email or "@" not in email:
+                        st.error("Digite um e-mail válido.")
+                    else:
+                        ok, msg, email_enviado = gerar_e_enviar_codigo(email)
+                        if ok:
+                            if email_enviado:
+                                st.session_state.email_aguardando_codigo = email
+                                st.success(msg)
+                                st.rerun()
+                            else:
+                                st.warning(msg)
+                        else:
+                            st.error(msg)
             else:
-                # Remover formatação do identificador (aceita apenas números)
-                id_limpo = re.sub(r'[^0-9]', '', str(identificador))
-                if len(id_limpo) < 8:
-                    st.error("CPF/INEP inválido! Digite pelo menos 8 números (sem pontos ou traços).")
-                else:
-                    usuario = autenticar_usuario(id_limpo, senha)
-                if usuario:
-                    st.session_state.logado = True
-                    st.session_state.usuario = usuario
-                    st.success(f"Login realizado com sucesso!")
+                st.success(f"Código enviado para **{email_aguardando}**. Digite o código recebido abaixo.")
+                if st.button("Usar outro e-mail", key="btn_outro_email"):
+                    st.session_state.email_aguardando_codigo = ""
                     st.rerun()
-                else:
-                    st.error("CPF/INEP ou senha incorretos!")
+                with st.form("login_form_codigo"):
+                    codigo_digitado = st.text_input("Código recebido:", placeholder="Ex: 123456", max_chars=6, key="codigo_login")
+                    entrar_btn = st.form_submit_button("Entrar")
+                if entrar_btn:
+                    usuario = validar_codigo_email(email_aguardando, codigo_digitado)
+                    if usuario:
+                        if MONITORING_AVAILABLE:
+                            try:
+                                client_info = get_client_info()
+                                firebase_manager.log_access(usuario=usuario.get('nome', 'Usuário'), ip=client_info['ip'], user_agent=client_info['user_agent'])
+                            except Exception as e:
+                                print(f"Erro ao registrar acesso: {e}")
+                        st.session_state.logado = True
+                        st.session_state.usuario = usuario
+                        st.session_state.email_aguardando_codigo = ""
+                        st.success("Login realizado com sucesso!")
+                        st.rerun()
+                    else:
+                        st.error("Código inválido ou expirado. Solicite um novo código.")
         
-        # Assinatura centralizada
         st.markdown("---")
         st.markdown("<div style='text-align: center;'><strong>© 2025 – desenvolvido por Alexandre Tolentino</strong></div>", unsafe_allow_html=True)
 
@@ -638,8 +789,8 @@ def salvar_config_email(email, senha):
     except:
         return False
 
-def enviar_email(destinatario, assunto, corpo, anexo=None):
-    """Envia email real com Gmail SMTP"""
+def enviar_email(destinatario, assunto, corpo, anexo=None, remetente_log=None):
+    """Envia email real com Gmail SMTP. remetente_log: nome no log (se None, usa usuário logado ou 'Sistema')."""
     try:
         import smtplib
         from email.mime.multipart import MIMEMultipart
@@ -648,24 +799,18 @@ def enviar_email(destinatario, assunto, corpo, anexo=None):
         from email import encoders
         import os
         
-        # Configurações do Gmail (você precisa configurar)
         gmail_user = os.getenv('GMAIL_USER', 'seu_email@gmail.com')
         gmail_password = os.getenv('GMAIL_PASSWORD', 'sua_senha_app')
         
-        # Se não tiver configuração, usar simulação
         if gmail_user == 'seu_email@gmail.com' or not gmail_password:
-            return enviar_email_simulado(destinatario, assunto, corpo, anexo)
+            return enviar_email_simulado(destinatario, assunto, corpo, anexo, remetente_log)
         
-        # Criar mensagem
         msg = MIMEMultipart()
         msg['From'] = gmail_user
         msg['To'] = destinatario
         msg['Subject'] = assunto
-        
-        # Adicionar corpo do email
         msg.attach(MIMEText(corpo, 'plain', 'utf-8'))
         
-        # Adicionar anexo se existir
         if anexo:
             part = MIMEBase('application', 'octet-stream')
             part.set_payload(anexo)
@@ -676,56 +821,47 @@ def enviar_email(destinatario, assunto, corpo, anexo=None):
             )
             msg.attach(part)
         
-        # Enviar email
         server = smtplib.SMTP('smtp.gmail.com', 587)
         server.starttls()
         server.login(gmail_user, gmail_password)
-        text = msg.as_string()
-        server.sendmail(gmail_user, destinatario, text)
+        server.sendmail(gmail_user, destinatario, msg.as_string())
         server.quit()
         
-        # Salvar log
+        remetente = remetente_log if remetente_log is not None else (st.session_state.get('usuario') or {}).get('nome', 'Sistema')
         log_info = {
             "destinatario": destinatario,
             "assunto": assunto,
             "data": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
-            "remetente": st.session_state.usuario['nome'],
+            "remetente": remetente,
             "status": "Enviado (Real)"
         }
-        
         try:
             with open("email_log.json", "a", encoding="utf-8") as f:
                 f.write(f"{json.dumps(log_info, ensure_ascii=False)}\n")
-        except:
+        except Exception:
             pass
-        
         return True, f"Email enviado para {destinatario} com sucesso!"
-        
     except Exception as e:
         return False, f"Erro ao enviar email: {str(e)}"
 
-def enviar_email_simulado(destinatario, assunto, corpo, anexo=None):
-    """Simula envio de email (fallback)"""
+def enviar_email_simulado(destinatario, assunto, corpo, anexo=None, remetente_log=None):
+    """Simula envio de email (fallback). remetente_log: nome no log (se None, usa usuário ou 'Sistema')."""
     try:
         import time
-        time.sleep(1)  # Simular processamento
-        
-        # Salvar informações do "envio" em um arquivo de log
+        time.sleep(1)
+        remetente = remetente_log if remetente_log is not None else (st.session_state.get('usuario') or {}).get('nome', 'Sistema')
         log_info = {
             "destinatario": destinatario,
             "assunto": assunto,
             "data": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
-            "remetente": st.session_state.usuario['nome'],
+            "remetente": remetente,
             "status": "Enviado (Simulado)"
         }
-        
-        # Salvar log (opcional)
         try:
             with open("email_log.json", "a", encoding="utf-8") as f:
                 f.write(f"{json.dumps(log_info, ensure_ascii=False)}\n")
-        except:
+        except Exception:
             pass
-        
         return True, f"Email simulado enviado para {destinatario} com sucesso!"
     except Exception as e:
         return False, f"Erro ao simular envio: {str(e)}"
@@ -2005,6 +2141,8 @@ if 'mostrar_stats_usuario' not in st.session_state:
     st.session_state.mostrar_stats_usuario = False
 if 'mostrar_sobre' not in st.session_state:
     st.session_state.mostrar_sobre = False
+if 'email_aguardando_codigo' not in st.session_state:
+    st.session_state.email_aguardando_codigo = ""
 
 # Verificar se deve mostrar tela de instruções
 if st.session_state.mostrar_instrucoes:
