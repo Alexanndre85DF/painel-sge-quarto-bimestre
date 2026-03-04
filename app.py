@@ -199,6 +199,12 @@ def alterar_senha(identificador, senha_atual, nova_senha):
 CODIGOS_LOGIN_FILE = "codigos_login.json"
 CODIGO_EXPIRA_MINUTOS = 10
 
+# Sessão: expira após 30 minutos e exige novo login
+SESSAO_EXPIRA_MINUTOS = 30
+
+# Login por INEP: False = oculto (só e-mail); True = mostra opção INEP+senha. Quem ocultou pode clicar "Sou escola" para voltar.
+MOSTRAR_LOGIN_INEP_POR_PADRAO = False
+
 def _carregar_codigos():
     try:
         if os.path.exists(CODIGOS_LOGIN_FILE):
@@ -479,7 +485,9 @@ def tela_instrucoes():
     st.markdown("<div style='text-align: center; padding: 2rem;'><strong style='color: #4a90e2; font-size: 1.1rem;'>© 2025 – desenvolvido por Alexandre Tolentino</strong></div>", unsafe_allow_html=True)
 
 def tela_login():
-    """Exibe tela de login: por INEP+senha (escolas) ou por e-mail (código enviado ao e-mail)."""
+    """Exibe tela de login: por INEP+senha (escolas) ou por e-mail (código enviado ao e-mail). INEP fica oculto por padrão (MOSTRAR_LOGIN_INEP_POR_PADRAO)."""
+    if "mostrar_login_inep" not in st.session_state:
+        st.session_state.mostrar_login_inep = MOSTRAR_LOGIN_INEP_POR_PADRAO
     st.markdown("""
     <style>
     .stButton > button[kind="primary"] { background-color: #1f77b4; color: white; border: none; border-radius: 0.5rem; padding: 0.75rem 1.5rem; font-size: 1.1rem; font-weight: 600; min-height: 3rem; }
@@ -497,17 +505,33 @@ def tela_login():
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         st.markdown("### Acesso ao Painel SGE")
-        
+        if st.session_state.get("sessao_expirada"):
+            st.warning(f"Sua sessão expirou após {SESSAO_EXPIRA_MINUTOS} minutos. Faça login novamente.")
+            st.session_state.sessao_expirada = False
+
+        # Opção INEP oculta por padrão (MOSTRAR_LOGIN_INEP_POR_PADRAO). Link "Sou escola" mostra de novo.
+        mostrar_inep = st.session_state.get("mostrar_login_inep", MOSTRAR_LOGIN_INEP_POR_PADRAO)
         if st.session_state.get("email_aguardando_codigo"):
             tipo_acesso = "E-mail (código enviado ao e-mail)"
-        else:
+        elif mostrar_inep:
             tipo_acesso = st.radio(
                 "Como deseja entrar?",
                 ["INEP + senha (escolas)", "E-mail (código enviado ao e-mail)"],
                 horizontal=True,
                 key="tipo_acesso_login"
             )
-        
+        else:
+            tipo_acesso = "E-mail (código enviado ao e-mail)"
+
+        if not mostrar_inep:
+            if st.button("Sou escola: acessar com INEP + senha", key="btn_mostrar_inep"):
+                st.session_state.mostrar_login_inep = True
+                st.rerun()
+        else:
+            if st.button("Ocultar acesso por INEP", key="btn_ocultar_inep"):
+                st.session_state.mostrar_login_inep = False
+                st.rerun()
+
         # ---------- INEP + senha (escolas) ----------
         if tipo_acesso == "INEP + senha (escolas)":
             st.info("Digite INEP (ou CPF) e a senha.")
@@ -527,6 +551,7 @@ def tela_login():
                         if usuario:
                             st.session_state.logado = True
                             st.session_state.usuario = usuario
+                            st.session_state.login_time = datetime.now()
                             st.success("Login realizado com sucesso!")
                             st.rerun()
                         else:
@@ -574,6 +599,7 @@ def tela_login():
                                 print(f"Erro ao registrar acesso: {e}")
                         st.session_state.logado = True
                         st.session_state.usuario = usuario
+                        st.session_state.login_time = datetime.now()
                         st.session_state.email_aguardando_codigo = ""
                         st.success("Login realizado com sucesso!")
                         st.rerun()
@@ -2143,6 +2169,12 @@ if 'mostrar_sobre' not in st.session_state:
     st.session_state.mostrar_sobre = False
 if 'email_aguardando_codigo' not in st.session_state:
     st.session_state.email_aguardando_codigo = ""
+if 'login_time' not in st.session_state:
+    st.session_state.login_time = None
+if 'sessao_expirada' not in st.session_state:
+    st.session_state.sessao_expirada = False
+if 'mostrar_login_inep' not in st.session_state:
+    st.session_state.mostrar_login_inep = MOSTRAR_LOGIN_INEP_POR_PADRAO
 
 # Verificar se deve mostrar tela de instruções
 if st.session_state.mostrar_instrucoes:
@@ -2153,6 +2185,17 @@ if st.session_state.mostrar_instrucoes:
 if not st.session_state.logado:
     tela_login()
     st.stop()
+
+# Sessão expirada após 30 minutos? Encerrar e exigir novo login
+if st.session_state.logado and st.session_state.get('login_time'):
+    tempo_logado = (datetime.now() - st.session_state.login_time).total_seconds()
+    if tempo_logado > (SESSAO_EXPIRA_MINUTOS * 60):
+        st.session_state.logado = False
+        st.session_state.usuario = None
+        st.session_state.login_time = None
+        st.session_state.sessao_expirada = True
+        st.session_state.mostrar_login_inep = MOSTRAR_LOGIN_INEP_POR_PADRAO
+        st.rerun()
 
 # Verificar se deve mostrar tela de alterar senha
 if st.session_state.mostrar_alterar_senha:
@@ -2237,6 +2280,7 @@ with col_nav5:
         
         st.session_state.logado = False
         st.session_state.usuario = None
+        st.session_state.mostrar_login_inep = MOSTRAR_LOGIN_INEP_POR_PADRAO
         st.rerun()
 
 st.markdown("---")
