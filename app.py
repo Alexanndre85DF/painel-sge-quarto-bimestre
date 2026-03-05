@@ -202,8 +202,6 @@ CODIGO_EXPIRA_MINUTOS = 10
 # Sessão: expira após 30 minutos e exige novo login
 SESSAO_EXPIRA_MINUTOS = 30
 
-# Login por INEP: False = oculto (só e-mail); True = mostra opção INEP+senha. Quem ocultou pode clicar "Sou escola" para voltar.
-MOSTRAR_LOGIN_INEP_POR_PADRAO = False
 
 def _carregar_codigos():
     try:
@@ -485,9 +483,7 @@ def tela_instrucoes():
     st.markdown("<div style='text-align: center; padding: 2rem;'><strong style='color: #4a90e2; font-size: 1.1rem;'>© 2025 – desenvolvido por Alexandre Tolentino</strong></div>", unsafe_allow_html=True)
 
 def tela_login():
-    """Exibe tela de login: por INEP+senha (escolas) ou por e-mail (código enviado ao e-mail). INEP fica oculto por padrão (MOSTRAR_LOGIN_INEP_POR_PADRAO)."""
-    if "mostrar_login_inep" not in st.session_state:
-        st.session_state.mostrar_login_inep = MOSTRAR_LOGIN_INEP_POR_PADRAO
+    """Login apenas por e-mail + código enviado ao e-mail. Sem CPF/INEP."""
     st.markdown("""
     <style>
     .stButton > button[kind="primary"] { background-color: #1f77b4; color: white; border: none; border-radius: 0.5rem; padding: 0.75rem 1.5rem; font-size: 1.1rem; font-weight: 600; min-height: 3rem; }
@@ -509,103 +505,53 @@ def tela_login():
             st.warning(f"Sua sessão expirou após {SESSAO_EXPIRA_MINUTOS} minutos. Faça login novamente.")
             st.session_state.sessao_expirada = False
 
-        # Opção INEP oculta por padrão (MOSTRAR_LOGIN_INEP_POR_PADRAO). Link "Sou escola" mostra de novo.
-        mostrar_inep = st.session_state.get("mostrar_login_inep", MOSTRAR_LOGIN_INEP_POR_PADRAO)
-        if st.session_state.get("email_aguardando_codigo"):
-            tipo_acesso = "E-mail (código enviado ao e-mail)"
-        elif mostrar_inep:
-            tipo_acesso = st.radio(
-                "Como deseja entrar?",
-                ["INEP + senha (escolas)", "E-mail (código enviado ao e-mail)"],
-                horizontal=True,
-                key="tipo_acesso_login"
-            )
-        else:
-            tipo_acesso = "E-mail (código enviado ao e-mail)"
-
-        if not mostrar_inep:
-            if st.button("Sou escola: acessar com INEP + senha", key="btn_mostrar_inep"):
-                st.session_state.mostrar_login_inep = True
-                st.rerun()
-        else:
-            if st.button("Ocultar acesso por INEP", key="btn_ocultar_inep"):
-                st.session_state.mostrar_login_inep = False
-                st.rerun()
-
-        # ---------- INEP + senha (escolas) ----------
-        if tipo_acesso == "INEP + senha (escolas)":
-            st.info("Digite INEP (ou CPF) e a senha.")
-            with st.form("login_form"):
-                identificador = st.text_input("CPF ou INEP:", placeholder="Apenas números")
-                senha = st.text_input("Senha:", type="password", placeholder="Sua senha")
-                login_btn = st.form_submit_button("Entrar")
-            if login_btn:
-                if not identificador or not senha:
-                    st.error("Preencha todos os campos.")
+        email_aguardando = st.session_state.get("email_aguardando_codigo") or ""
+        if not email_aguardando:
+            st.info("Informe seu e-mail. Um código de acesso será enviado para esse e-mail.")
+            with st.form("login_form_email"):
+                email_digitado = st.text_input("E-mail:", placeholder="seu_email@exemplo.com", key="email_login")
+                enviar_btn = st.form_submit_button("Enviar código por e-mail")
+            if enviar_btn:
+                email = (email_digitado or "").strip()
+                if not email or "@" not in email:
+                    st.error("Digite um e-mail válido.")
                 else:
-                    id_limpo = re.sub(r'[^0-9]', '', str(identificador))
-                    if len(id_limpo) < 8:
-                        st.error("CPF/INEP inválido. Use pelo menos 8 números.")
-                    else:
-                        usuario = autenticar_usuario(id_limpo, senha)
-                        if usuario:
-                            st.session_state.logado = True
-                            st.session_state.usuario = usuario
-                            st.session_state.login_time = datetime.now()
-                            st.success("Login realizado com sucesso!")
+                    ok, msg, email_enviado = gerar_e_enviar_codigo(email)
+                    if ok:
+                        if email_enviado:
+                            st.session_state.email_aguardando_codigo = email
+                            st.success(msg)
                             st.rerun()
                         else:
-                            st.error("CPF/INEP ou senha incorretos.")
-        
-        # ---------- E-mail: enviar código para o e-mail ----------
+                            st.warning(msg)
+                    else:
+                        st.error(msg)
         else:
-            email_aguardando = st.session_state.get("email_aguardando_codigo") or ""
-            if not email_aguardando:
-                st.info("Informe seu e-mail. Um código de acesso será enviado para esse e-mail.")
-                with st.form("login_form_email"):
-                    email_digitado = st.text_input("E-mail:", placeholder="seu_email@exemplo.com", key="email_login")
-                    enviar_btn = st.form_submit_button("Enviar código por e-mail")
-                if enviar_btn:
-                    email = (email_digitado or "").strip()
-                    if not email or "@" not in email:
-                        st.error("Digite um e-mail válido.")
-                    else:
-                        ok, msg, email_enviado = gerar_e_enviar_codigo(email)
-                        if ok:
-                            if email_enviado:
-                                st.session_state.email_aguardando_codigo = email
-                                st.success(msg)
-                                st.rerun()
-                            else:
-                                st.warning(msg)
-                        else:
-                            st.error(msg)
-            else:
-                st.success(f"Código enviado para **{email_aguardando}**. Digite o código recebido abaixo.")
-                if st.button("Usar outro e-mail", key="btn_outro_email"):
+            st.success(f"Código enviado para **{email_aguardando}**. Digite o código recebido abaixo.")
+            if st.button("Usar outro e-mail", key="btn_outro_email"):
+                st.session_state.email_aguardando_codigo = ""
+                st.rerun()
+            with st.form("login_form_codigo"):
+                codigo_digitado = st.text_input("Código recebido:", placeholder="Ex: 123456", max_chars=6, key="codigo_login")
+                entrar_btn = st.form_submit_button("Entrar")
+            if entrar_btn:
+                usuario = validar_codigo_email(email_aguardando, codigo_digitado)
+                if usuario:
+                    if MONITORING_AVAILABLE:
+                        try:
+                            client_info = get_client_info()
+                            firebase_manager.log_access(usuario=usuario.get('nome', 'Usuário'), ip=client_info['ip'], user_agent=client_info['user_agent'])
+                        except Exception as e:
+                            print(f"Erro ao registrar acesso: {e}")
+                    st.session_state.logado = True
+                    st.session_state.usuario = usuario
+                    st.session_state.login_time = datetime.now()
                     st.session_state.email_aguardando_codigo = ""
+                    st.success("Login realizado com sucesso!")
                     st.rerun()
-                with st.form("login_form_codigo"):
-                    codigo_digitado = st.text_input("Código recebido:", placeholder="Ex: 123456", max_chars=6, key="codigo_login")
-                    entrar_btn = st.form_submit_button("Entrar")
-                if entrar_btn:
-                    usuario = validar_codigo_email(email_aguardando, codigo_digitado)
-                    if usuario:
-                        if MONITORING_AVAILABLE:
-                            try:
-                                client_info = get_client_info()
-                                firebase_manager.log_access(usuario=usuario.get('nome', 'Usuário'), ip=client_info['ip'], user_agent=client_info['user_agent'])
-                            except Exception as e:
-                                print(f"Erro ao registrar acesso: {e}")
-                        st.session_state.logado = True
-                        st.session_state.usuario = usuario
-                        st.session_state.login_time = datetime.now()
-                        st.session_state.email_aguardando_codigo = ""
-                        st.success("Login realizado com sucesso!")
-                        st.rerun()
-                    else:
-                        st.error("Código inválido ou expirado. Solicite um novo código.")
-        
+                else:
+                    st.error("Código inválido ou expirado. Solicite um novo código.")
+
         st.markdown("---")
         st.markdown("<div style='text-align: center;'><strong>© 2025 – desenvolvido por Alexandre Tolentino</strong></div>", unsafe_allow_html=True)
 
@@ -2173,9 +2119,6 @@ if 'login_time' not in st.session_state:
     st.session_state.login_time = None
 if 'sessao_expirada' not in st.session_state:
     st.session_state.sessao_expirada = False
-if 'mostrar_login_inep' not in st.session_state:
-    st.session_state.mostrar_login_inep = MOSTRAR_LOGIN_INEP_POR_PADRAO
-
 # Verificar se deve mostrar tela de instruções
 if st.session_state.mostrar_instrucoes:
     tela_instrucoes()
@@ -2194,7 +2137,6 @@ if st.session_state.logado and st.session_state.get('login_time'):
         st.session_state.usuario = None
         st.session_state.login_time = None
         st.session_state.sessao_expirada = True
-        st.session_state.mostrar_login_inep = MOSTRAR_LOGIN_INEP_POR_PADRAO
         st.rerun()
 
 # Verificar se deve mostrar tela de alterar senha
@@ -2280,7 +2222,6 @@ with col_nav5:
         
         st.session_state.logado = False
         st.session_state.usuario = None
-        st.session_state.mostrar_login_inep = MOSTRAR_LOGIN_INEP_POR_PADRAO
         st.rerun()
 
 st.markdown("---")
