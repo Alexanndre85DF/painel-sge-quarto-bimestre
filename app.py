@@ -4198,7 +4198,7 @@ with st.expander("📈 Geral - Notas Abaixo da Média por Disciplina (1º + 2º 
         contagem['Cor'] = ['#1e40af' if i % 2 == 0 else '#059669' for i in range(len(contagem))]
         
         fig = px.bar(contagem, x="Disciplina", y="Qtd Notas < 6", 
-                    title="Notas abaixo da média (1º + 2º + 3º Bimestre)",
+                    title="Notas abaixo da média (1º + 2º + 3º + 4º Bimestre)",
                     color="Cor",
                     color_discrete_map={'#1e40af': '#1e40af', '#059669': '#059669'})
         
@@ -4626,18 +4626,21 @@ if "StatusFinal" in indic.columns and "MediaFinal" in indic.columns:
         
         # Gráfico de distribuição final
         st.markdown("#### 📊 Distribuição Final: Aprovados vs Reprovados")
+        st.caption(f"📋 **Registros (Aluno-Disciplina):** {total_final} total | 👥 **Alunos únicos:** {alunos_aprovados} com aprovação, {alunos_reprovados} com reprovação (um aluno pode ter disciplinas em ambas)")
         dados_final = pd.DataFrame({
             'Status': ['Aprovados (≥6)', 'Reprovados (<6)'],
-            'Quantidade': [aprovados_final, reprovados_final]
+            'Quantidade': [aprovados_final, reprovados_final],
+            'Alunos_unicos': [alunos_aprovados, alunos_reprovados]
         })
+        texto_barras = [f"{aprovados_final}  |  {alunos_aprovados} alunos", f"{reprovados_final}  |  {alunos_reprovados} alunos"]
         
         fig_final = px.bar(dados_final, x='Status', y='Quantidade',
-                          title=f"Total: {total_final} registros (Aluno-Disciplina)",
+                          title=f"Total: {total_final} registros (Aluno-Disciplina) | {total_alunos_final} alunos únicos",
                           color='Status',
                           color_discrete_map={'Aprovados (≥6)': '#10b981', 'Reprovados (<6)': '#ef4444'},
                           text='Quantidade')
-        fig_final.update_traces(texttemplate='%{text} (%{y:.0%})', textposition='outside')
-        fig_final.update_layout(showlegend=False, yaxis_title="Quantidade", xaxis_title=None)
+        fig_final.update_traces(text=texto_barras, textposition='outside')
+        fig_final.update_layout(showlegend=False, yaxis_title="Quantidade (registros Aluno-Disciplina)", xaxis_title=None)
         st.plotly_chart(fig_final, use_container_width=True)
         
         # Tabela detalhada com conceito final
