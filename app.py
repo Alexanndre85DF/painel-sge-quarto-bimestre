@@ -1831,7 +1831,7 @@ def mapear_bimestre(periodo: str) -> int | None:
     """Mapeia 'Primeiro Bimestre' -> 1, 'Segundo Bimestre' -> 2, etc."""
     if not isinstance(periodo, str):
         return None
-    p = periodo.lower()
+    p = periodo.strip().lower()
     if "primeiro" in p or "1º" in p or "1o" in p:
         return 1
     if "segundo" in p or "2º" in p or "2o" in p:
@@ -1840,6 +1840,16 @@ def mapear_bimestre(periodo: str) -> int | None:
         return 3
     if "quarto" in p or "4º" in p or "4o" in p:
         return 4
+    # Capturar variações comuns: "1 BIM", "BIMESTRE 2", "B3", "4°", etc.
+    m = re.search(r"\b([1-4])\b", p)
+    if m:
+        return int(m.group(1))
+    m = re.search(r"\bb\s*([1-4])\b", p)  # b1, b 2
+    if m:
+        return int(m.group(1))
+    m = re.search(r"\b([1-4])\s*(?:º|°)?\s*bim", p)  # 3º bim / 4 bim
+    if m:
+        return int(m.group(1))
     return None
 
 def classificar_status_b1_b2(n1, n2, media12):
@@ -2667,10 +2677,11 @@ st.markdown("""
 st.markdown("#### 📉 Total de Notas Abaixo de 6 por Bimestre")
 col1, col2, col3, col4 = st.columns(4)
 
-notas_baixas_b1 = df_filt[df_filt["Periodo"].str.contains("Primeiro", case=False, na=False) & (df_filt["Nota"] < MEDIA_APROVACAO)]
-notas_baixas_b2 = df_filt[df_filt["Periodo"].str.contains("Segundo", case=False, na=False) & (df_filt["Nota"] < MEDIA_APROVACAO)]
-notas_baixas_b3 = df_filt[df_filt["Periodo"].str.contains("Terceiro", case=False, na=False) & (df_filt["Nota"] < MEDIA_APROVACAO)]
-notas_baixas_b4 = df_filt[df_filt["Periodo"].str.contains("Quarto", case=False, na=False) & (df_filt["Nota"] < MEDIA_APROVACAO)]
+bimestre_kpi = df_filt["Periodo"].apply(mapear_bimestre) if "Periodo" in df_filt.columns else pd.Series([None] * len(df_filt), index=df_filt.index)
+notas_baixas_b1 = df_filt[(bimestre_kpi == 1) & (df_filt["Nota"] < MEDIA_APROVACAO)]
+notas_baixas_b2 = df_filt[(bimestre_kpi == 2) & (df_filt["Nota"] < MEDIA_APROVACAO)]
+notas_baixas_b3 = df_filt[(bimestre_kpi == 3) & (df_filt["Nota"] < MEDIA_APROVACAO)]
+notas_baixas_b4 = df_filt[(bimestre_kpi == 4) & (df_filt["Nota"] < MEDIA_APROVACAO)]
 
 # Número de alunos únicos com notas baixas (não disciplinas)
 alunos_notas_baixas_b1 = notas_baixas_b1[coluna_aluno].nunique() if coluna_aluno in notas_baixas_b1.columns else 0
@@ -3101,7 +3112,7 @@ with st.expander(expander_title):
         
         # Aplicar cores
         styled_freq = freq_detalhada[[coluna_aluno, "Turma", "Frequencia_Formatada", "Classificacao_Freq"]]\
-            .style.applymap(color_frequencia, subset=["Classificacao_Freq"])
+            .style.map(color_frequencia, subset=["Classificacao_Freq"])
         
         st.dataframe(styled_freq, use_container_width=True)
         
@@ -3224,11 +3235,11 @@ if len(tabela_alerta) > 0:
     col_classificacao = "ClassificacaoFinal" if "ClassificacaoFinal" in tabela_alerta.columns and tabela_alerta["ClassificacaoFinal"].notna().any() else "Classificacao"
     
     # Aplicar estilização
-    styled_alerta = tabela_alerta[cols_visiveis].style.applymap(color_classification, subset=[col_classificacao])
+    styled_alerta = tabela_alerta[cols_visiveis].style.map(color_classification, subset=[col_classificacao])
     
     # Se houver StatusFinal, aplicar cores também (usar applymap novamente no styled já criado)
     if "StatusFinal" in tabela_alerta[cols_visiveis].columns:
-        styled_alerta = styled_alerta.applymap(color_status_final, subset=["StatusFinal"])
+        styled_alerta = styled_alerta.map(color_status_final, subset=["StatusFinal"])
     
     st.dataframe(styled_alerta, use_container_width=True)
     
@@ -3406,7 +3417,7 @@ if len(incompletos) > 0:
         cols_incompletos_geral.extend(["Falta", "Classificacao"])
         if "StatusFinal" in incompletos_ordenados.columns:
             cols_incompletos_geral.append("StatusFinal")
-        styled_incompletos_geral = incompletos_ordenados[cols_incompletos_geral].style.applymap(color_classification, subset=["Classificacao"])
+        styled_incompletos_geral = incompletos_ordenados[cols_incompletos_geral].style.map(color_classification, subset=["Classificacao"])
         st.dataframe(styled_incompletos_geral, use_container_width=True)
         
         # Botão de exportação geral
@@ -3462,7 +3473,7 @@ if len(incompletos) > 0:
             
             # Mostrar tabela do 1º bimestre
             cols_incompletos_b1 = [coluna_aluno, "Turma", "Disciplina", "N1", "N2", "Media12", "Classificacao"]
-            styled_incompletos_b1 = incompletos_b1_ordenados[cols_incompletos_b1].style.applymap(color_classification, subset=["Classificacao"])
+            styled_incompletos_b1 = incompletos_b1_ordenados[cols_incompletos_b1].style.map(color_classification, subset=["Classificacao"])
             st.dataframe(styled_incompletos_b1, use_container_width=True)
             
             # Botão de exportação do 1º bimestre
@@ -3520,7 +3531,7 @@ if len(incompletos) > 0:
             
             # Mostrar tabela do 2º bimestre
             cols_incompletos_b2 = [coluna_aluno, "Turma", "Disciplina", "N1", "N2", "Media12", "Classificacao"]
-            styled_incompletos_b2 = incompletos_b2_ordenados[cols_incompletos_b2].style.applymap(color_classification, subset=["Classificacao"])
+            styled_incompletos_b2 = incompletos_b2_ordenados[cols_incompletos_b2].style.map(color_classification, subset=["Classificacao"])
             st.dataframe(styled_incompletos_b2, use_container_width=True)
             
             # Botão de exportação do 2º bimestre
@@ -3578,7 +3589,7 @@ if len(incompletos) > 0:
             
             # Mostrar tabela do 3º bimestre
             cols_incompletos_b3 = [coluna_aluno, "Turma", "Disciplina", "N1", "N2", "N3", "Media123", "Classificacao"]
-            styled_incompletos_b3 = incompletos_b3_ordenados[cols_incompletos_b3].style.applymap(color_classification, subset=["Classificacao"])
+            styled_incompletos_b3 = incompletos_b3_ordenados[cols_incompletos_b3].style.map(color_classification, subset=["Classificacao"])
             st.dataframe(styled_incompletos_b3, use_container_width=True)
             
             # Botão de exportação do 3º bimestre
@@ -3658,10 +3669,10 @@ if len(incompletos) > 0:
             cols_incompletos_b4 = [c for c in cols_incompletos_b4 if c in incompletos_b4_ordenados.columns]
             
             col_classificacao_b4 = "ClassificacaoFinal" if "ClassificacaoFinal" in incompletos_b4_ordenados.columns and incompletos_b4_ordenados["ClassificacaoFinal"].notna().any() else "Classificacao"
-            styled_incompletos_b4 = incompletos_b4_ordenados[cols_incompletos_b4].style.applymap(color_classification, subset=[col_classificacao_b4])
+            styled_incompletos_b4 = incompletos_b4_ordenados[cols_incompletos_b4].style.map(color_classification, subset=[col_classificacao_b4])
             
             if "StatusFinal" in cols_incompletos_b4:
-                styled_incompletos_b4 = styled_incompletos_b4.applymap(color_status_final, subset=["StatusFinal"])
+                styled_incompletos_b4 = styled_incompletos_b4.map(color_status_final, subset=["StatusFinal"])
             
             st.dataframe(styled_incompletos_b4, use_container_width=True)
             
@@ -3869,7 +3880,7 @@ colunas_tabela = [c for c in colunas_tabela if c in tab_diag.columns]
 
 styled_table = tab_diag[colunas_tabela]\
     .sort_values(["Turma", coluna_aluno, "Disciplina"])\
-    .style.applymap(color_classification, subset=["Classificacao"])
+    .style.map(color_classification, subset=["Classificacao"])
 
 st.dataframe(styled_table, use_container_width=True)
 
@@ -4809,9 +4820,9 @@ with st.expander("Análise Cruzada: Notas x Frequência"):
                         return ""
                 
                 # Aplicar cores nas duas colunas de classificação
-                styled_cruzada = freq_baixa_display.style.applymap(
+                styled_cruzada = freq_baixa_display.style.map(
                     color_classification, subset=["Classificacao"]
-                ).applymap(
+                ).map(
                     color_frequencia_classification, subset=["Classificacao_Freq"]
                 )
                 
@@ -5060,7 +5071,7 @@ if len(alunos_duplicados) > 0:
             return ""
     
     # Aplicar cores
-    styled_duplicados = df_alunos_duplicados.style.applymap(color_qtd_turmas, subset=["Qtd_Turmas"])
+    styled_duplicados = df_alunos_duplicados.style.map(color_qtd_turmas, subset=["Qtd_Turmas"])
     
     st.dataframe(styled_duplicados, use_container_width=True)
     
